@@ -1,8 +1,5 @@
 use clap::Parser;
-use jituan_core::core::engine;
-use jituan_core::core::models::{Task, TaskStatus};
-use jituan_core::core::scheduler::Scheduler;
-use jituan_core::core::storage;
+use jituan_core::core::{engine, models::{Task, TaskStatus}, scheduler::Scheduler, storage, updater};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -10,24 +7,72 @@ use tokio::sync::Mutex;
 #[derive(Parser, Debug)]
 #[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器")]
 struct Args {
-    /// 下载链接
-    url: String,
+    /// 下载链接 (使用 --update 时可省略)
+    url: Option<String>, 
+    
     /// 保存文件名 (可选)
     #[arg(short, long)]
     output: Option<String>,
+    
     /// 初始并发分片数 (默认 16)
     #[arg(short, long, default_value_t = 16)]
     connections: usize,
+
+    /// 检查并更新到最新版本
+    #[arg(short, long)]
+    update: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // 1. 如果用户明确要求更新
+    if args.update {
+        println!("正在检查更新...");
+        match updater::check_update().await {
+            Ok(Some((new_ver, url))) => {
+                println!("发现新版本 v{}，正在下载安装包...", new_ver);
+                updater::download_and_install(&url).await?;
+                println!("更新程序已启动，当前进程即将退出。");
+                std::process::exit(0);
+            }
+            Ok(None) => {
+                println!("当前已是最新版本 (v{})。", updater::CURRENT_VERSION);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("检查更新失败: {}", e);
+                return Ok(());
+            }
+        }
+    }
+
+    // 2. 如果没有提供 URL，且没要求更新，提示用法
+    let url = match args.url {
+        Some(u) => u,
+        None => {
+            eprintln!("错误：请提供下载链接，或使用 --update 检查更新。");
+            return Ok(());
+        }
+    };
+
+    // 3. 后台自动版本检查（不阻塞主流程）
+    let _url_clone = url.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if let Ok(Some((new_ver, _))) = updater::check_update().await {
+            // 用黄色（终端转义字符）打印提示
+            println!("\n\x1b[33m[提示] 发现汲湍新版本 v{}，可使用 `jituan-cli --update` 升级。\x1b[0m", new_ver);
+        }
+    });
+
+    // 4. 正常下载逻辑
     let file_path = PathBuf::from(args.output.unwrap_or_else(|| "download.bin".to_string()));
     let meta_path = file_path.with_extension("jtdl");
 
     println!("🌊 汲湍下载引擎启动");
-    println!("目标链接: {}", args.url);
+    println!("目标链接: {}", url);
 
     let scheduler = Arc::new(Scheduler::new(32, args.connections));
     let client = reqwest::Client::new();
@@ -38,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
         println!("已恢复进度: {:.2}%", t.progress());
         Arc::new(Mutex::new(t))
     } else {
-        let res = client.get(&args.url).header("Range", "bytes=0-0").send().await?;
+        let res = client.get(&url).header("Range", "bytes=0-0").send().await?;
         let total_size = res.headers().get("content-range")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.split('/').nth(1))
@@ -54,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         let file = std::fs::File::create(&file_path)?;
         file.set_len(total_size)?;
 
-        let t = Task::new("cli_task".to_string(), args.url.clone(), file_path.clone(), total_size, concurrency);
+        let t = Task::new("cli_task".to_string(), url.clone(), file_path.clone(), total_size, concurrency);
         storage::save_task(&t).await?;
         Arc::new(Mutex::new(t))
     };
@@ -68,7 +113,6 @@ async fn main() -> anyhow::Result<()> {
     let chunk_count = { task_arc.lock().await.chunks.len() };
     
     for i in 0..chunk_count {
-        // 跳过已下载完成的分片
         let is_finished = { task_arc.lock().await.chunks[i].is_finished };
         if is_finished { continue; }
 
@@ -76,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
             client.clone(),
             task_arc.clone(),
             i,
-            args.url.clone(),
+            url.clone(),
             file_path.to_string_lossy().to_string(),
             scheduler.global_limit.clone(),
         ));
@@ -100,7 +144,6 @@ async fn main() -> anyhow::Result<()> {
                 break; 
             }
             
-            // 每秒自动存盘
             let _ = storage::save_task(&t).await;
             
             drop(t);

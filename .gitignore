@@ -1,6 +1,7 @@
 /target
-Cargo.lock
 *.bin
 *.jtdl
 *.apk
 *.msi
+/installer/JiTuan_Release/
+/installer/Output/
