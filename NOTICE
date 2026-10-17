@@ -1,0 +1,43 @@
+汲湍 (JiTuan)
+Copyright 2026 choked-up-now
+
+This product includes software developed at
+choked-up-now (https://atomgit.com/choked-up-now/JiTuan).
+
+================================================================================
+Third-Party Components Notice
+================================================================================
+
+This software is built using the Rust programming language and relies on 
+various open-source crates. The following is a list of major third-party 
+components and their respective licenses. For a complete dependency tree, 
+please refer to the Cargo.lock file.
+
+- tokio (https://crates.io/crates/tokio)
+  License: MIT
+
+- reqwest (https://crates.io/crates/reqwest)
+  License: MIT OR Apache-2.0
+
+- eframe / egui (https://crates.io/crates/eframe)
+  License: MIT OR Apache-2.0
+
+- serde (https://crates.io/crates/serde)
+  License: MIT OR Apache-2.0
+
+- serde_json (https://crates.io/crates/serde_json)
+  License: MIT OR Apache-2.0
+
+- clap (https://crates.io/crates/clap)
+  License: MIT OR Apache-2.0
+
+================================================================================
+System Resources Notice
+================================================================================
+
+The Graphical User Interface (GUI) version of this software dynamically loads 
+system fonts provided by the host operating system for text rendering (e.g., 
+"Microsoft YaHei" on Windows). These font files are not distributed with this 
+software and remain subject to their respective system vendor licenses.
+
+================================================================================

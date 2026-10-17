@@ -1,0 +1,42 @@
+[package]
+name = "jituan"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "jituan_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jituan-cli"
+path = "src/bin/jituan-cli.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "jituan-gui"
+path = "src/bin/jituan-gui.rs"
+required-features = ["gui"]
+
+[dependencies]
+anyhow = "1.0.104"
+tokio = { version = "1.53.3", features = ["full"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["stream", "http2", "native-tls"] }
+futures-util = "0.3.34"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+# 可选依赖
+clap = { version = "4.5", features = ["derive"], optional = true }
+eframe = { version = "0.28", optional = true }
+
+[features]
+default = []
+cli = ["dep:clap"]
+gui = ["dep:eframe"]
+full = ["cli", "gui"]
+
+# 开启编译优化（极大加快下载时的数据处理速度）
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
