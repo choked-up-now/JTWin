@@ -63,7 +63,7 @@ if "%ATOMGIT_TOKEN%"=="" ( echo [错误] 读取 Token 失败。 & pause & exit /
 set TOKEN_PREVIEW=%ATOMGIT_TOKEN:~0,5%
 echo [信息] 成功读取 Token，前 5 位: %TOKEN_PREVIEW%***
 
-:: --- 使用正确的 API 基址和认证头 ---
+:: --- API 基础设置 ---
 set API_BASE=https://api.atomgit.com/api/v5
 set REPO_OWNER=choked-up-now
 set REPO_NAME=JiTuan
@@ -72,17 +72,17 @@ set API_URL=%API_BASE%/repos/%REPO_OWNER%/%REPO_NAME%/releases
 echo [信息] 正在请求创建 Release API...
 echo {"tag_name":"%TAG%","name":"JiTuan %TAG%","body":"Auto build by pipeline."} > temp_release.json
 
-:: 关键修正：使用 PRIVATE-TOKEN 认证头
+:: 创建 Release
 curl -s -X POST "%API_URL%" ^
   -H "PRIVATE-TOKEN: %ATOMGIT_TOKEN%" ^
   -H "Content-Type: application/json" ^
   -d @temp_release.json -o temp_resp.json
 del temp_release.json
 
-:: 检查返回内容
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$json = Get-Content 'temp_resp.json' -Raw | ConvertFrom-Json; if ($json.tag_name) { 'OK' } else { $json.message }"`) do set RELEASE_CHECK=%%i
+:: 解析返回的 JSON 获取 Release ID
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$json = Get-Content 'temp_resp.json' -Raw | ConvertFrom-Json; if ($json.id) { $json.id }"`) do set RELEASE_ID=%%i
 
-if not "%RELEASE_CHECK%"=="OK" (
+if "%RELEASE_ID%"=="" (
     echo.
     echo [错误] 创建 Release 失败，服务器返回:
     type temp_resp.json
@@ -92,33 +92,26 @@ if not "%RELEASE_CHECK%"=="OK" (
     exit /b
 )
 del temp_resp.json
-echo [成功] Release 创建成功！
+echo [成功] Release 创建成功！ID: %RELEASE_ID%
 
-:: --- 附件上传（按两步签名法）---
-echo [信息] 正在获取附件上传地址...
-set UPLOAD_URL=%API_BASE%/repos/%REPO_OWNER%/%REPO_NAME%/releases/%TAG%/upload_url?file_name=JiTuan_%TAG%_Setup.exe
-curl -s "%UPLOAD_URL%" -H "PRIVATE-TOKEN: %ATOMGIT_TOKEN%" -o temp_upload_resp.json
+:: --- 直接上传附件，不需要两步签名，直接用 curl -F ---
+echo [信息] 正在上传安装包 %EXE_PATH% ...
+set UPLOAD_URL=%API_BASE%/repos/%REPO_OWNER%/%REPO_NAME%/releases/%RELEASE_ID%/attach_files
 
-:: 使用 PowerShell 提取 URL 和 headers（复杂解析）
-echo [信息] 正在上传安装包（需 PowerShell 辅助，可能稍慢）...
-powershell -NoProfile -Command ^
-  "$json = Get-Content 'temp_upload_resp.json' -Raw | ConvertFrom-Json; ^
-   if (-not $json.url) { Write-Error '无法获取上传地址'; exit 1 }; ^
-   $headers = @{}; ^
-   $json.headers.PSObject.Properties | ForEach-Object { $headers[$_.Name] = $_.Value }; ^
-   $headers['Content-Type'] = 'application/octet-stream'; ^
-   try { ^
-     Invoke-RestMethod -Uri $json.url -Method Put -Headers $headers -InFile '%EXE_PATH%' -ErrorAction Stop; ^
-     Write-Output 'UPLOAD_OK' ^
-   } catch { Write-Error $_.Exception.Message; exit 1 }"
+curl -s -X POST "%UPLOAD_URL%" ^
+  -H "PRIVATE-TOKEN: %ATOMGIT_TOKEN%" ^
+  -F "file=@%EXE_PATH%" -o temp_upload_resp.json
 
+:: 检查是否上传成功 (API 返回里会有 browser_download_url)
+findstr "browser_download_url" temp_upload_resp.json >nul
 if %errorlevel% equ 0 (
     echo [成功] 附件上传成功！
     echo =========================================
     echo 🎉 发版流程圆满结束！
     echo =========================================
 ) else (
-    echo [错误] 附件上传失败。
+    echo [错误] 附件上传失败，服务器返回:
+    type temp_upload_resp.json
 )
 del temp_upload_resp.json
 
