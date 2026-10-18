@@ -15,19 +15,21 @@ try {
     $tag = "v${version}"
     Write-Host "[信息] 当前版本: $tag"
 
-    # 2. 同步版本号到 .iss
+    # 2. 同步版本号到 .iss（修复读取时的编码丢失）
     Write-Host "[信息] 正在同步版本号到安装脚本..."
     $issPath = "installer\JiTuan.iss"
     if (-not (Test-Path $issPath)) { throw "找不到 $issPath 文件！" }
-    $issContent = Get-Content $issPath -Raw
+    
+    $issContent = [System.IO.File]::ReadAllText((Resolve-Path $issPath), [System.Text.Encoding]::UTF8)
     $issContent = $issContent -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
     [System.IO.File]::WriteAllText((Resolve-Path $issPath), $issContent, (New-Object System.Text.UTF8Encoding($true)))
 
-    # 3-5. 编译、打包、Inno Setup (保持不变)
+    # 3. 编译 Release 版本
     Write-Host "`n[1/5] 正在编译 Release 版本..." -ForegroundColor Yellow
     cargo build --release --features full
     if ($LASTEXITCODE -ne 0) { throw "cargo build 失败！" }
 
+    # 4. 准备打包文件
     Write-Host "`n[2/5] 正在准备打包文件..." -ForegroundColor Yellow
     $releaseDir = "installer\JiTuan_Release"
     if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
@@ -36,6 +38,7 @@ try {
     if (Test-Path "LICENSE") { Copy-Item "LICENSE" -Destination $releaseDir -Force }
     if (Test-Path "NOTICE") { Copy-Item "NOTICE" -Destination $releaseDir -Force }
 
+    # 5. 调用 Inno Setup 生成安装包
     Write-Host "`n[3/5] 正在调用 Inno Setup 生成安装包..." -ForegroundColor Yellow
     $isccPath = "D:\Inno Setup 6\ISCC.exe"
     if (-not (Test-Path $isccPath)) { throw "找不到 Inno Setup，请检查路径：$isccPath" }
@@ -45,7 +48,7 @@ try {
     $exePath = "installer\Output\JiTuan_${tag}_Setup.exe"
     if (-not (Test-Path $exePath)) { throw "找不到生成的安装包：$exePath" }
 
-    # 6. Git 提交与推送 (保持不变)
+    # 6. Git 提交与推送
     Write-Host "`n[4/5] 正在推送到 AtomGit..." -ForegroundColor Yellow
     git add .
     git diff-index --quiet HEAD
@@ -54,7 +57,7 @@ try {
     git push origin main
     git push origin -f $tag
 
-    # 7. 创建 Release 并上传附件 (使用 tag_name 和签名两步法)
+    # 7. 创建 Release 并上传附件
     Write-Host "`n[5/5] 正在创建 AtomGit Release 并上传附件..." -ForegroundColor Yellow
 
     $secretPath = "..\secret.txt"
@@ -88,7 +91,7 @@ try {
         }
     }
 
-    # --- 签名两步法上传附件 ---
+    # 签名两步法上传附件
     $fileName = Split-Path $exePath -Leaf
     Write-Host "[信息] 正在获取附件上传地址..."
     $uploadUrlApi = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}/upload_url?file_name=${fileName}"
@@ -96,25 +99,21 @@ try {
     try {
         $uploadMeta = Invoke-RestMethod -Uri $uploadUrlApi -Method Get -Headers $headers -ErrorAction Stop
         $signedUrl = $uploadMeta.url
-        # 将 PSCustomObject 转换为哈希表
         $uploadHeaders = @{}
         $uploadMeta.headers.PSObject.Properties | ForEach-Object { $uploadHeaders[$_.Name] = $_.Value }
 
         Write-Host "[信息] 正在上传安装包（PUT 请求）..."
         
-        # 使用 HttpClient 进行 PUT 上传，确保二进制流和 headers 正确传递
         Add-Type -AssemblyName System.Net.Http
         $client = New-Object System.Net.Http.HttpClient
         
-        # 添加签名所需的 headers
         foreach ($key in $uploadHeaders.Keys) {
-            if ($key -eq "Content-Type") { continue } # 由内容类型参数处理
+            if ($key -eq "Content-Type") { continue }
             $client.DefaultRequestHeaders.Add($key, $uploadHeaders[$key])
         }
 
         $fileStream = [System.IO.File]::OpenRead((Resolve-Path $exePath))
         $streamContent = New-Object System.Net.Http.StreamContent($fileStream)
-        # 设置 Content-Type，如果签名 headers 里有则使用，否则用默认的
         $contentType = if ($uploadHeaders["Content-Type"]) { $uploadHeaders["Content-Type"] } else { "application/octet-stream" }
         $streamContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($contentType)
 

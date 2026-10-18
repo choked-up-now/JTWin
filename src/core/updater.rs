@@ -16,7 +16,8 @@ struct AtomGitAsset {
 }
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const UPDATE_API_URL: &str = "https://atomgit.com/api/v5/repos/choked-up-now/JiTuan/releases/latest";
+// AtomGit API 地址
+const UPDATE_API_URL: &str = "https://api.atomgit.com/api/v5/repos/choked-up-now/JiTuan/releases";
 
 pub async fn check_update() -> Result<Option<(String, String)>> {
     let client = reqwest::Client::builder()
@@ -32,19 +33,24 @@ pub async fn check_update() -> Result<Option<(String, String)>> {
         return Ok(None);
     }
 
-    let release: AtomGitRelease = resp.json().await?;
-    let latest_ver_str = release.tag_name.trim_start_matches('v');
+    // 解析列表，取最新
+    let releases: Vec<AtomGitRelease> = resp.json().await?;
     
-    let current_ver = Version::parse(CURRENT_VERSION)?;
-    if let Ok(latest_ver) = Version::parse(latest_ver_str) {
-        if latest_ver > current_ver {
-            for asset in release.assets {
-                if asset.name.ends_with(".exe") {
-                    return Ok(Some((latest_ver_str.to_string(), asset.browser_download_url)));
+    if let Some(latest) = releases.first() {
+        let latest_ver_str = latest.tag_name.trim_start_matches('v');
+        
+        let current_ver = Version::parse(CURRENT_VERSION)?;
+        if let Ok(latest_ver) = Version::parse(latest_ver_str) {
+            if latest_ver > current_ver {
+                for asset in &latest.assets {
+                    if asset.name.ends_with(".exe") {
+                        return Ok(Some((latest_ver_str.to_string(), asset.browser_download_url.clone())));
+                    }
                 }
             }
         }
     }
+    
     Ok(None)
 }
 
@@ -62,10 +68,28 @@ pub async fn download_and_install(url: &str) -> Result<()> {
     {
         use std::os::windows::process::CommandExt;
         let mut cmd = std::process::Command::new(&path);
-        cmd.args(["/SILENT", "/CLOSEAPPLICATIONS"]);
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        
+        // 静默安装，关闭应用，且【不创建桌面快捷方式】
+        cmd.args([
+            "/SILENT", 
+            "/CLOSEAPPLICATIONS", 
+            "/SUPPRESSMSGBOXES",
+            "/MERGETASKS=\"!desktopicon\""
+        ]);
+        
+        // 屏蔽所有输出，防止黑框
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        cmd.stdin(std::process::Stdio::null());
+
+        // CREATE_NO_WINDOW | DETACHED_PROCESS
+        cmd.creation_flags(0x08000000 | 0x00000008); 
         let _ = cmd.spawn();
     }
 
-    Ok(())
+    // 给安装程序留出接管时间
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    
+    // 退出当前进程
+    std::process::exit(0);
 }
