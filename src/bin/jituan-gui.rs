@@ -6,18 +6,24 @@ use tokio::sync::Mutex;
 
 struct JituanApp {
     url: String,
+    save_path: String,
     status_text: String,
     progress: Arc<StdMutex<f32>>,
     is_downloading: bool,
     update_available: Arc<StdMutex<Option<(String, String)>>>,
     is_checking_update: bool,
-    has_checked_update: bool, // 防止每次重绘都触发检查
+    has_checked_update: bool,
 }
 
 impl Default for JituanApp {
     fn default() -> Self {
         Self {
             url: "https://atomgit.com/choked-up-now/CiXian/releases/download/v0.12.2/app-arm64-v8a-release.apk".to_string(),
+            save_path: dirs::download_dir()
+                .unwrap_or_else(|| std::env::current_dir().unwrap())
+                .join("jituan_download.apk")
+                .to_string_lossy()
+                .to_string(),
             status_text: "准备就绪".to_string(),
             progress: Arc::new(StdMutex::new(0.0)),
             is_downloading: false,
@@ -33,7 +39,6 @@ impl eframe::App for JituanApp {
         let current_progress = *self.progress.lock().unwrap();
         let update_opt = self.update_available.lock().unwrap().clone();
 
-        // 1. 启动时自动检查更新
         if !self.has_checked_update {
             self.has_checked_update = true;
             let ctx_clone = ctx.clone();
@@ -74,30 +79,36 @@ impl eframe::App for JituanApp {
             ui.label("极致轻量、动态并发的桌面下载器");
             ui.separator();
 
-            // 2. 发现新版本提示 UI
             if let Some((new_ver, download_url)) = update_opt {
                 ui.horizontal(|ui| {
                     ui.colored_label(egui::Color32::YELLOW, format!("🎉 发现新版本 v{}", new_ver));
                     if ui.button("立即更新并重启").clicked() {
                         self.status_text = "正在下载更新包...".to_string();
-                        
+                        let ctx_clone = ctx.clone();
                         std::thread::spawn(move || {
                             let rt = tokio::runtime::Runtime::new().unwrap();
                             rt.block_on(async move {
                                 let _ = updater::download_and_install(&download_url).await;
                                 std::process::exit(0);
                             });
+                            ctx_clone.request_repaint();
                         });
                     }
                 });
                 ui.separator();
             }
 
-            // 3. 下载区域 UI
             ui.horizontal(|ui| {
                 ui.label("下载链接:");
                 ui.add_enabled_ui(!self.is_downloading, |ui| {
                     ui.text_edit_singleline(&mut self.url);
+                });
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("保存路径:");
+                ui.add_enabled_ui(!self.is_downloading, |ui| {
+                    ui.text_edit_singleline(&mut self.save_path);
                 });
             });
 
@@ -107,13 +118,14 @@ impl eframe::App for JituanApp {
                 *self.progress.lock().unwrap() = 0.0; 
                 
                 let url = self.url.clone();
+                let file_path_str = self.save_path.clone();
                 let progress_clone = self.progress.clone();
                 let ctx_clone = ctx.clone();
 
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     rt.block_on(async move {
-                        let file_path = PathBuf::from("gui_download.apk");
+                        let file_path = PathBuf::from(&file_path_str);
                         
                         let client = match reqwest::Client::builder()
                             .timeout(std::time::Duration::from_secs(15))
@@ -143,7 +155,6 @@ impl eframe::App for JituanApp {
                                 .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
                             (size, 1)
                         } else {
-                            eprintln!("服务器拒绝连接，状态码: {}", res.status());
                             (0, 1)
                         };
 
@@ -195,7 +206,7 @@ impl eframe::App for JituanApp {
             }
 
             if current_progress < 0.0 {
-                ui.colored_label(egui::Color32::RED, "❌ 下载失败，请检查网络或服务器拒绝访问");
+                ui.colored_label(egui::Color32::RED, "❌ 下载失败，请检查网络或路径是否有写入权限");
             } else {
                 ui.add(egui::ProgressBar::new(current_progress).show_percentage());
                 if current_progress >= 1.0 {
@@ -214,7 +225,7 @@ impl eframe::App for JituanApp {
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([450.0, 260.0]), // 增高了一点以容纳更新条
+        viewport: egui::ViewportBuilder::default().with_inner_size([450.0, 280.0]),
         ..Default::default()
     };
     

@@ -10,7 +10,7 @@ struct Args {
     /// 下载链接 (使用 --update 时可省略)
     url: Option<String>, 
     
-    /// 保存文件名 (可选)
+    /// 保存文件名 (可选，默认保存到系统的下载文件夹)
     #[arg(short, long)]
     output: Option<String>,
     
@@ -27,7 +27,6 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // 1. 如果用户明确要求更新
     if args.update {
         println!("正在检查更新...");
         match updater::check_update().await {
@@ -48,7 +47,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 2. 如果没有提供 URL，且没要求更新，提示用法
     let url = match args.url {
         Some(u) => u,
         None => {
@@ -57,22 +55,27 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 3. 后台自动版本检查（不阻塞主流程）
-    let _url_clone = url.clone();
+    let url_clone = url.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         if let Ok(Some((new_ver, _))) = updater::check_update().await {
-            // 用黄色（终端转义字符）打印提示
             println!("\n\x1b[33m[提示] 发现汲湍新版本 v{}，可使用 `jituan-cli --update` 升级。\x1b[0m", new_ver);
         }
     });
 
-    // 4. 正常下载逻辑
-    let file_path = PathBuf::from(args.output.unwrap_or_else(|| "download.bin".to_string()));
+    let file_path = match args.output {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let dir = dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap());
+            dir.join("download.bin")
+        }
+    };
+    
     let meta_path = file_path.with_extension("jtdl");
 
     println!("🌊 汲湍下载引擎启动");
     println!("目标链接: {}", url);
+    println!("保存至: {:?}", file_path);
 
     let scheduler = Arc::new(Scheduler::new(32, args.connections));
     let client = reqwest::Client::new();
@@ -127,7 +130,6 @@ async fn main() -> anyhow::Result<()> {
         handles.push(h);
     }
 
-    // 实时进度监控与存盘
     let task_clone = task_arc.clone();
     let monitor = tokio::spawn(async move {
         loop {

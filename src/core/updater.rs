@@ -18,7 +18,6 @@ struct AtomGitAsset {
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const UPDATE_API_URL: &str = "https://atomgit.com/api/v5/repos/choked-up-now/JiTuan/releases/latest";
 
-/// 检查是否有新版本，如果有则返回 (版本号, 下载链接)
 pub async fn check_update() -> Result<Option<(String, String)>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -49,7 +48,6 @@ pub async fn check_update() -> Result<Option<(String, String)>> {
     Ok(None)
 }
 
-/// 下载并执行更新
 pub async fn download_and_install(url: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let res = client.get(url).send().await?;
@@ -60,15 +58,12 @@ pub async fn download_and_install(url: &str) -> Result<()> {
     
     let path = temp.into_temp_path();
 
-    // Windows 下静默安装
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         let mut cmd = std::process::Command::new(&path);
-        // 静默安装 + 关闭占用程序
         cmd.args(["/SILENT", "/CLOSEAPPLICATIONS"]);
-        // 0x08000000 是 CREATE_NO_WINDOW，不弹出黑框
-        cmd.creation_flags(0x08000000); 
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         let _ = cmd.spawn();
     }
 
