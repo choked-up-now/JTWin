@@ -104,16 +104,18 @@ try {
             # 【核心修改】获取列表，而不是获取单个 tags
             $listApiUrl = "$apiBase/repos/$repoOwner/$repoName/releases?per_page=100"
             try {
-                $releases = Invoke-RestMethod -Uri $listApiUrl -Method Get -Headers $headers -ErrorAction Stop
-                # 筛选出 tag 匹配的第一个
-                $targetRelease = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
+                $existing = Invoke-RestMethod -Uri $tagApiUrl -Method Get -Headers $headers -ErrorAction Stop
+                # 打印出具体的 JSON 结构
+                Write-Host "--- [调试] AtomGit 返回的数据 ---" -ForegroundColor Magenta
+                $existing | ConvertTo-Json -Depth 3 | Write-Host -ForegroundColor Gray
+                Write-Host "--------------------------------" -ForegroundColor Magenta
                 
-                if ($targetRelease) {
-                    $releaseId = $targetRelease.id
-                    Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
-                } else {
-                    throw "在 Releases 列表中未找到 $tag"
-                }
+                # 尝试兼容不同平台可能的不同字段名
+                if ($existing.id) { $releaseId = $existing.id }
+                elseif ($existing.release_id) { $releaseId = $existing.release_id }
+                elseif ($existing.data -and $existing.data.id) { $releaseId = $existing.data.id }
+                
+                Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
             } catch {
                 throw "无法获取已有 Release: $($_.Exception.Message)"
             }
