@@ -49,28 +49,34 @@ echo.
 echo [4/5] 正在推送到 AtomGit...
 git add .
 git commit -m "chore: release %TAG%"
-git tag %TAG%
+:: 强制覆盖已有的 Tag，防止报错
+git tag -f %TAG%
 git push origin main
-git push origin %TAG%
+:: 强制覆盖远程 Tag
+git push origin -f %TAG%
 
 :: 6. 全自动发布到 AtomGit Release
 echo.
 echo [5/5] 正在创建 AtomGit Release 并上传附件...
 
 if not exist "..\secret.txt" (
-    echo [警告] 未找到 ..\secret.txt，跳过自动发布。
+    echo ⚠️ 未找到 ..\secret.txt (在上一级目录)，跳过自动发布。
     pause
     exit /b
 )
 
-:: 读取 Token 并去除换行/空格/BOM
+:: 读取 Token 并去除换行/空格
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$t = (Get-Content '..\secret.txt' -Raw).Trim(); if ($t -match '^\xEF\xBB\xBF') { $t = $t.Substring(1) }; $t"`) do set ATOMGIT_TOKEN=%%i
 
 if "%ATOMGIT_TOKEN%"=="" (
-    echo [错误] 读取 Token 失败，请检查 secret.txt 文件。
+    echo [错误] 读取 Token 失败，secret.txt 内容为空或格式不对。
     pause
     exit /b
 )
+
+:: 打印 Token 前 5 位，确认是否读取成功 (脱敏保护)
+set TOKEN_PREVIEW=%ATOMGIT_TOKEN:~0,5%
+echo [信息] 成功读取 Token，前 5 位: %TOKEN_PREVIEW%***
 
 set REPO_OWNER=choked-up-now
 set REPO_NAME=JiTuan
@@ -106,7 +112,7 @@ findstr "browser_download_url" temp_upload.json >nul
 if %errorlevel% equ 0 (
     echo [成功] 附件上传成功！
     echo =========================================
-    echo 发版流程圆满结束！
+    echo 🎉 发版流程圆满结束！
     echo =========================================
 ) else (
     echo [错误] 附件上传失败，返回信息:

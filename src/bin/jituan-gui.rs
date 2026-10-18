@@ -84,14 +84,12 @@ impl eframe::App for JituanApp {
                     ui.colored_label(egui::Color32::YELLOW, format!("🎉 发现新版本 v{}", new_ver));
                     if ui.button("立即更新并重启").clicked() {
                         self.status_text = "正在下载更新包...".to_string();
-                        let ctx_clone = ctx.clone();
                         std::thread::spawn(move || {
                             let rt = tokio::runtime::Runtime::new().unwrap();
                             rt.block_on(async move {
                                 let _ = updater::download_and_install(&download_url).await;
                                 std::process::exit(0);
                             });
-                            ctx_clone.request_repaint();
                         });
                     }
                 });

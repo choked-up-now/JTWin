@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let url_clone = url.clone();
+    let _url_clone = url.clone();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         if let Ok(Some((new_ver, _))) = updater::check_update().await {
