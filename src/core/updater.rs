@@ -34,22 +34,26 @@ pub async fn check_update() -> Result<Option<(String, String)>> {
 
     let releases: Vec<AtomGitRelease> = resp.json().await?;
     
-    if let Some(latest) = releases.first() {
-        let latest_ver_str = latest.tag_name.trim_start_matches('v');
-        
-        let current_ver = Version::parse(CURRENT_VERSION)?;
-        if let Ok(latest_ver) = Version::parse(latest_ver_str) {
-            if latest_ver > current_ver {
-                for asset in &latest.assets {
+    let current_ver = Version::parse(CURRENT_VERSION)?;
+    let mut best_ver = current_ver.clone();
+    let mut best_download = None;
+
+    for release in releases {
+        let tag_str = release.tag_name.trim_start_matches('v');
+        if let Ok(ver) = Version::parse(tag_str) {
+            if ver > best_ver {
+                for asset in &release.assets {
                     if asset.name.ends_with(".exe") {
-                        return Ok(Some((latest_ver_str.to_string(), asset.browser_download_url.clone())));
+                        best_ver = ver;
+                        best_download = Some((tag_str.to_string(), asset.browser_download_url.clone()));
+                        break;
                     }
                 }
             }
         }
     }
     
-    Ok(None)
+    Ok(best_download)
 }
 
 pub async fn download_and_install(url: &str) -> Result<()> {

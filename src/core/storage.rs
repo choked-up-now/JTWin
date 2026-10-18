@@ -3,7 +3,6 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 pub async fn save_task(task: &Task) -> Result<()> {
-    // 采用 .jtdl 专属后缀
     let meta_path = task.file_path.with_extension("jtdl"); 
     let json = serde_json::to_string_pretty(task)
         .context("序列化任务失败")?;

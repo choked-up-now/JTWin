@@ -54,18 +54,23 @@ try {
     git diff-index --quiet HEAD
     if ($LASTEXITCODE -ne 0) { git commit -m "chore: release $tag" } else { Write-Host "[Git] 无文件变更，跳过提交。" }
     git tag -f $tag
-    git push origin main
-    git push origin -f $tag
-
-    # 7. 创建 Release 并上传附件
-    Write-Host "`n[5/5] 正在创建 AtomGit Release 并上传附件..." -ForegroundColor Yellow
-
+    
     $secretPath = "..\secret.txt"
     if (-not (Test-Path $secretPath)) { throw "未找到 $secretPath，请把 Token 放在上一级目录。" }
     $token = (Get-Content $secretPath -Raw).Trim()
     if ([string]::IsNullOrEmpty($token)) { throw "读取 Token 失败，secret.txt 内容为空。" }
 
-    Write-Host "[信息] 成功读取 Token，前 5 位: $($token.Substring(0, 5))***"
+    $pushUrl = "https://oauth2:${token}@atomgit.com/choked-up-now/JiTuan.git"
+    git push $pushUrl main -f
+    git push $pushUrl $tag -f
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[警告] Git 推送失败，可能是因为没有文件变更或权限问题。" -ForegroundColor Yellow
+    } else {
+        Write-Host "[成功] 代码和 Tag 已成功推送到 AtomGit。" -ForegroundColor Green
+    }
+
+    # 7. 创建 Release 并上传附件
+    Write-Host "`n[5/5] 正在创建 AtomGit Release 并上传附件..." -ForegroundColor Yellow
 
     $headers = @{ "PRIVATE-TOKEN" = $token }
     $apiBase = "https://api.atomgit.com/api/v5"
@@ -78,26 +83,45 @@ try {
     $notesPath = "release_notes.md"
     $releaseBody = "Auto build by pipeline."
     if (Test-Path $notesPath) {
-        $releaseBody = [System.IO.File]::ReadAllText((Resolve-Path $notesPath), [System.Text.Encoding]::UTF8)
+        $releaseBody = [System.IO.File]::ReadAllText((Resolve-Path $notesPath), [System.Text.Encoding]::UTF8).Trim()
     }
 
+    $dateStr = Get-Date -Format "yyyyMMdd"
+    $releaseTitle = "汲湍 $tag $dateStr"
+
     $body = @{
-        tag_name = $tag
-        name     = "JiTuan $tag"
-        body     = $releaseBody
+        tag_name       = $tag
+        name           = $releaseTitle
+        body           = $releaseBody
+        prerelease     = $false
+        release_status = "latest"
     } | ConvertTo-Json
 
     try {
         $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop
-        Write-Host "[成功] Release 创建成功！" -ForegroundColor Green
+        Write-Host "[成功] Release 创建成功并标记为最新！" -ForegroundColor Green
     } catch {
         if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Conflict) {
-            Write-Host "[警告] Release 已存在，跳过创建，直接准备上传。" -ForegroundColor Yellow
+            Write-Host "[警告] Release 已存在，正在尝试更新已有 Release 标记..." -ForegroundColor Yellow
+            $updateApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}"
+            try {
+                $patchResponse = Invoke-RestMethod -Uri $updateApiUrl -Method Patch -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop
+                Write-Host "[成功] 已有 Release 已更新并标记为最新！" -ForegroundColor Green
+            } catch {
+                Write-Host "[警告] 无法更新已有 Release 标记，继续执行上传。" -ForegroundColor Yellow
+            }
+        } elseif ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
+            $errStream = $_.Exception.Response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($errStream)
+            $errBody = $reader.ReadToEnd()
+            Write-Host "❌ [400 详细错误] $errBody" -ForegroundColor Red
+            throw "创建 Release 失败，400 错误详情已打印在上方。"
         } else {
             throw "创建 Release 失败: $($_.Exception.Message)"
         }
     }
 
+    # 8. 上传附件
     $fileName = Split-Path $exePath -Leaf
     Write-Host "[信息] 正在获取附件上传地址..."
     $uploadUrlApi = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}/upload_url?file_name=${fileName}"

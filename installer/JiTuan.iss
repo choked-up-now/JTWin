@@ -1,5 +1,5 @@
 ﻿#define MyAppName "汲湍 (JiTuan)"
-#define MyAppVersion "0.2.4"
+#define MyAppVersion "0.2.5"
 #define MyAppPublisher "choked-up-now"
 #define MyAppURL "https://atomgit.com/choked-up-now/JiTuan"
 

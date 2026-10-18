@@ -27,7 +27,7 @@ impl Scheduler {
 
     pub fn calculate_quota(&self) -> usize {
         let active = self.active_tasks.load(Ordering::SeqCst).max(1);
-        let total_permits = 32; // 全局最大并发数
+        let total_permits = 32;
         let quota = (total_permits / active).clamp(1, self.max_per_task);
         quota
     }
