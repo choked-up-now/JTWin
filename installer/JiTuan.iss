@@ -1,4 +1,4 @@
-#define MyAppName "姹叉箥 (JiTuan)"
+﻿#define MyAppName "姹叉箥 (JiTuan)"
 #define MyAppVersion "0.2.2"
 #define MyAppPublisher "choked-up-now"
 #define MyAppURL "https://atomgit.com/choked-up-now/JiTuan"
@@ -35,7 +35,6 @@ Source: "JiTuan_Release\LICENSE"; DestDir: "{app}"; Components: gui or cli
 Source: "JiTuan_Release\NOTICE"; DestDir: "{app}"; Components: gui or cli
 
 [Components]
-; 涓よ€呴兘鍙€夛紝浣嗛渶瑕侀€氳繃浠ｇ爜鎷︽埅
 Name: "gui"; Description: "姹叉箥 鍥惧舰鐣岄潰鐗?(GUI)"; Types: full compact custom
 Name: "cli"; Description: "姹叉箥 鍛戒护琛岀増 (CLI, 灏嗚嚜鍔ㄥ姞鍏ョ郴缁?PATH)"; Types: full custom
 
@@ -51,7 +50,6 @@ Filename: "{app}\jituan-gui.exe"; Description: "绔嬪嵆杩愯 姹叉箥"; F
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  // 鎷︽埅鈥滈€夋嫨缁勪欢鈥濋〉闈㈢殑涓嬩竴姝ュ姩浣?
   if CurPageID = wpSelectComponents then
   begin
     if (not WizardIsComponentSelected('gui')) and (not WizardIsComponentSelected('cli')) then

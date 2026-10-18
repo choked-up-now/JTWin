@@ -25,14 +25,12 @@ try {
     }
     $issContent = Get-Content $issPath -Raw
     $issContent = $issContent -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
-    [System.IO.File]::WriteAllText((Resolve-Path $issPath), $issContent, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText((Resolve-Path $issPath), $issContent, (New-Object System.Text.UTF8Encoding($true)))
 
     # 3. 编译 Release 版本
     Write-Host "`n[1/5] 正在编译 Release 版本..." -ForegroundColor Yellow
     cargo build --release --features full
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo build 失败！"
-    }
+    if ($LASTEXITCODE -ne 0) { throw "cargo build 失败！" }
 
     # 4. 准备打包文件
     Write-Host "`n[2/5] 正在准备打包文件..." -ForegroundColor Yellow
@@ -47,18 +45,12 @@ try {
     # 5. 调用 Inno Setup 生成安装包
     Write-Host "`n[3/5] 正在调用 Inno Setup 生成安装包..." -ForegroundColor Yellow
     $isccPath = "D:\Inno Setup 6\ISCC.exe"
-    if (-not (Test-Path $isccPath)) {
-        throw "找不到 Inno Setup，请检查路径：$isccPath"
-    }
+    if (-not (Test-Path $isccPath)) { throw "找不到 Inno Setup，请检查路径：$isccPath" }
     & $isccPath "installer\JiTuan.iss"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Inno Setup 编译失败，请检查 .iss 脚本。"
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败，请检查 .iss 脚本。" }
 
     $exePath = "installer\Output\JiTuan_${tag}_Setup.exe"
-    if (-not (Test-Path $exePath)) {
-        throw "找不到生成的安装包：$exePath"
-    }
+    if (-not (Test-Path $exePath)) { throw "找不到生成的安装包：$exePath" }
 
     # 6. Git 提交与推送
     Write-Host "`n[4/5] 正在推送到 AtomGit..." -ForegroundColor Yellow
@@ -77,14 +69,10 @@ try {
     Write-Host "`n[5/5] 正在创建 AtomGit Release 并上传附件..." -ForegroundColor Yellow
 
     $secretPath = "..\secret.txt"
-    if (-not (Test-Path $secretPath)) {
-        throw "未找到 $secretPath，请把 Token 放在上一级目录。"
-    }
+    if (-not (Test-Path $secretPath)) { throw "未找到 $secretPath，请把 Token 放在上一级目录。" }
 
     $token = (Get-Content $secretPath -Raw).Trim()
-    if ([string]::IsNullOrEmpty($token)) {
-        throw "读取 Token 失败，secret.txt 内容为空。"
-    }
+    if ([string]::IsNullOrEmpty($token)) { throw "读取 Token 失败，secret.txt 内容为空。" }
 
     Write-Host "[信息] 成功读取 Token，前 5 位: $($token.Substring(0, 5))***"
 
@@ -113,11 +101,19 @@ try {
         $errResponse = $_.Exception.Response
         if ($errResponse.StatusCode -eq [System.Net.HttpStatusCode]::Conflict) {
             Write-Host "[警告] Release 已存在，尝试获取已有 ID..." -ForegroundColor Yellow
-            $tagApiUrl = "$apiBase/repos/$repoOwner/$repoName/releases/tags/$tag"
+            # 【核心修改】获取列表，而不是获取单个 tags
+            $listApiUrl = "$apiBase/repos/$repoOwner/$repoName/releases?per_page=100"
             try {
-                $existing = Invoke-RestMethod -Uri $tagApiUrl -Method Get -Headers $headers -ErrorAction Stop
-                $releaseId = $existing.id
-                Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
+                $releases = Invoke-RestMethod -Uri $listApiUrl -Method Get -Headers $headers -ErrorAction Stop
+                # 筛选出 tag 匹配的第一个
+                $targetRelease = $releases | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1
+                
+                if ($targetRelease) {
+                    $releaseId = $targetRelease.id
+                    Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
+                } else {
+                    throw "在 Releases 列表中未找到 $tag"
+                }
             } catch {
                 throw "无法获取已有 Release: $($_.Exception.Message)"
             }
@@ -164,5 +160,4 @@ try {
     Write-Host "`n❌ [致命错误] $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# 最稳妥的暂停方式
 Read-Host "`n按回车键退出..."
