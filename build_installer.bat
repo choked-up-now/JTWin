@@ -72,29 +72,47 @@ set API_URL=%API_BASE%/repos/%REPO_OWNER%/%REPO_NAME%/releases
 echo [信息] 正在请求创建 Release API...
 echo {"tag_name":"%TAG%","name":"JiTuan %TAG%","body":"Auto build by pipeline."} > temp_release.json
 
-:: 创建 Release
+:: 尝试创建 Release
 curl -s -X POST "%API_URL%" ^
   -H "PRIVATE-TOKEN: %ATOMGIT_TOKEN%" ^
   -H "Content-Type: application/json" ^
   -d @temp_release.json -o temp_resp.json
 del temp_release.json
 
-:: 解析返回的 JSON 获取 Release ID
+:: 检查是否创建成功
+findstr "\"id\":" temp_resp.json >nul
+if %errorlevel% neq 0 (
+    echo.
+    echo [警告] 创建 Release 失败，可能是该版本已存在。
+    echo [信息] 正在尝试获取已存在的 Release ID...
+    
+    :: 获取 Tag 对应的 Release
+    set TAG_API_URL=%API_BASE%/repos/%REPO_OWNER%/%REPO_NAME%/releases/tags/%TAG%
+    curl -s "%TAG_API_URL%" -H "PRIVATE-TOKEN: %ATOMGIT_TOKEN%" -o temp_resp.json
+    
+    findstr "\"id\":" temp_resp.json >nul
+    if %errorlevel% neq 0 (
+        echo.
+        echo [错误] 无法获取 Release，服务器返回:
+        type temp_resp.json
+        del temp_resp.json
+        pause
+        exit /b
+    )
+)
+
+:: 解析 Release ID
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$json = Get-Content 'temp_resp.json' -Raw | ConvertFrom-Json; if ($json.id) { $json.id }"`) do set RELEASE_ID=%%i
+del temp_resp.json
 
 if "%RELEASE_ID%"=="" (
-    echo.
-    echo [错误] 创建 Release 失败，服务器返回:
-    type temp_resp.json
-    echo.
-    del temp_resp.json
+    echo [错误] 解析 Release ID 失败。
     pause
     exit /b
 )
-del temp_resp.json
-echo [成功] Release 创建成功！ID: %RELEASE_ID%
+echo [成功] Release 已就绪，ID: %RELEASE_ID%
 
-:: --- 直接上传附件，不需要两步签名，直接用 curl -F ---
+:: --- 上传附件 ---
 echo [信息] 正在上传安装包 %EXE_PATH% ...
 set UPLOAD_URL=%API_BASE%/repos/%REPO_OWNER%/%REPO_NAME%/releases/%RELEASE_ID%/attach_files
 
@@ -102,7 +120,7 @@ curl -s -X POST "%UPLOAD_URL%" ^
   -H "PRIVATE-TOKEN: %ATOMGIT_TOKEN%" ^
   -F "file=@%EXE_PATH%" -o temp_upload_resp.json
 
-:: 检查是否上传成功 (API 返回里会有 browser_download_url)
+:: 检查是否上传成功
 findstr "browser_download_url" temp_upload_resp.json >nul
 if %errorlevel% equ 0 (
     echo [成功] 附件上传成功！
