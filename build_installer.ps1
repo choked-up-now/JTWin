@@ -7,156 +7,130 @@ try {
     Write-Host " 汲湍 (JiTuan) 自动构建与发布流水线" -ForegroundColor Cyan
     Write-Host "=========================================" -ForegroundColor Cyan
 
-    # 1. 提取 Cargo.toml 里的版本号
+    # 1. 提取版本号
     $cargoToml = Get-Content "Cargo.toml" -Raw
     $versionMatch = [regex]::Match($cargoToml, '(?m)^version\s*=\s*"(.*?)"')
     if (-not $versionMatch.Success) { throw "无法从 Cargo.toml 读取版本号" }
-    
     $version = $versionMatch.Groups[1].Value
-    # 使用 ${} 防解析错误
     $tag = "v${version}"
     Write-Host "[信息] 当前版本: $tag"
 
-    # 2. 同步版本号到 installer/JiTuan.iss
+    # 2. 同步版本号到 .iss
     Write-Host "[信息] 正在同步版本号到安装脚本..."
     $issPath = "installer\JiTuan.iss"
     if (-not (Test-Path $issPath)) { throw "找不到 $issPath 文件！" }
-    
     $issContent = Get-Content $issPath -Raw
     $issContent = $issContent -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
     [System.IO.File]::WriteAllText((Resolve-Path $issPath), $issContent, (New-Object System.Text.UTF8Encoding($true)))
 
-    # 3. 编译 Release 版本
+    # 3-5. 编译、打包、Inno Setup (保持不变)
     Write-Host "`n[1/5] 正在编译 Release 版本..." -ForegroundColor Yellow
     cargo build --release --features full
     if ($LASTEXITCODE -ne 0) { throw "cargo build 失败！" }
 
-    # 4. 准备打包文件
     Write-Host "`n[2/5] 正在准备打包文件..." -ForegroundColor Yellow
     $releaseDir = "installer\JiTuan_Release"
     if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
-
     Copy-Item "D:\Rust\target\release\jituan-gui.exe" -Destination $releaseDir -Force
     Copy-Item "D:\Rust\target\release\jituan-cli.exe" -Destination $releaseDir -Force
     if (Test-Path "LICENSE") { Copy-Item "LICENSE" -Destination $releaseDir -Force }
     if (Test-Path "NOTICE") { Copy-Item "NOTICE" -Destination $releaseDir -Force }
 
-    # 5. 调用 Inno Setup 生成安装包
     Write-Host "`n[3/5] 正在调用 Inno Setup 生成安装包..." -ForegroundColor Yellow
     $isccPath = "D:\Inno Setup 6\ISCC.exe"
     if (-not (Test-Path $isccPath)) { throw "找不到 Inno Setup，请检查路径：$isccPath" }
     & $isccPath "installer\JiTuan.iss"
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败，请检查 .iss 脚本。" }
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败。" }
 
     $exePath = "installer\Output\JiTuan_${tag}_Setup.exe"
     if (-not (Test-Path $exePath)) { throw "找不到生成的安装包：$exePath" }
 
-    # 6. Git 提交与推送
+    # 6. Git 提交与推送 (保持不变)
     Write-Host "`n[4/5] 正在推送到 AtomGit..." -ForegroundColor Yellow
     git add .
     git diff-index --quiet HEAD
-    if ($LASTEXITCODE -ne 0) {
-        git commit -m "chore: release $tag"
-    } else {
-        Write-Host "[Git] 无文件变更，跳过提交。"
-    }
+    if ($LASTEXITCODE -ne 0) { git commit -m "chore: release $tag" } else { Write-Host "[Git] 无文件变更，跳过提交。" }
     git tag -f $tag
     git push origin main
     git push origin -f $tag
 
-    # 7. 创建 Release 并上传附件
+    # 7. 创建 Release 并上传附件 (使用 tag_name 和签名两步法)
     Write-Host "`n[5/5] 正在创建 AtomGit Release 并上传附件..." -ForegroundColor Yellow
 
     $secretPath = "..\secret.txt"
     if (-not (Test-Path $secretPath)) { throw "未找到 $secretPath，请把 Token 放在上一级目录。" }
-
     $token = (Get-Content $secretPath -Raw).Trim()
     if ([string]::IsNullOrEmpty($token)) { throw "读取 Token 失败，secret.txt 内容为空。" }
 
     Write-Host "[信息] 成功读取 Token，前 5 位: $($token.Substring(0, 5))***"
 
-    $headers = @{
-        "PRIVATE-TOKEN" = $token
-        "Content-Type"  = "application/json"
-    }
+    $headers = @{ "PRIVATE-TOKEN" = $token }
     $apiBase = "https://api.atomgit.com/api/v5"
     $repoOwner = "choked-up-now"
     $repoName = "JiTuan"
-    # 所有拼接都加上 ${}
     $releaseApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases"
 
-    Write-Host "[信息] 正在请求创建 Release API..."
+    Write-Host "[信息] 正在创建 Release..."
     $body = @{
         tag_name = $tag
         name     = "JiTuan $tag"
         body     = "Auto build by pipeline."
     } | ConvertTo-Json
 
-    $releaseId = $null
     try {
-        $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -Body $body -ErrorAction Stop
-        $releaseId = $response.id
-        Write-Host "[成功] Release 创建成功！ID: $releaseId" -ForegroundColor Green
+        $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop
+        Write-Host "[成功] Release 创建成功！" -ForegroundColor Green
     } catch {
-        $errResponse = $_.Exception.Response
-        if ($errResponse.StatusCode -eq [System.Net.HttpStatusCode]::Conflict) {
-            Write-Host "[警告] Release 已存在，尝试获取已有 ID..." -ForegroundColor Yellow
-            $tagApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/tags/${tag}"
-            try {
-                # 为了兼容，请求后直接解析
-                $existing = Invoke-RestMethod -Uri $tagApiUrl -Method Get -Headers $headers -ErrorAction Stop
-                
-                # AtomGit / Gitee 的返回可能是对象，也可能带有 data
-                if ($existing.id) {
-                    $releaseId = $existing.id
-                } elseif ($existing.data -and $existing.data.id) {
-                    $releaseId = $existing.data.id
-                }
-
-                if ($releaseId) {
-                    Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
-                } else {
-                    # 打印一下看看 JSON 长啥样
-                    Write-Host "调试信息: `n$($existing | ConvertTo-Json -Depth 3)" -ForegroundColor Gray
-                    throw "请求成功，但未能解析出 Release ID"
-                }
-            } catch {
-                throw "无法获取已有 Release: $($_.Exception.Message)"
-            }
+        if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Conflict) {
+            Write-Host "[警告] Release 已存在，跳过创建，直接准备上传。" -ForegroundColor Yellow
         } else {
             throw "创建 Release 失败: $($_.Exception.Message)"
         }
     }
 
-    if (-not $releaseId) { throw "无法获取 Release ID" }
-
-    # 8. 上传附件
-    Write-Host "[信息] 正在上传安装包 $exePath ..."
-    $uploadApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${releaseId}/attach_files"
-
+    # --- 签名两步法上传附件 ---
+    $fileName = Split-Path $exePath -Leaf
+    Write-Host "[信息] 正在获取附件上传地址..."
+    $uploadUrlApi = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}/upload_url?file_name=${fileName}"
+    
     try {
+        $uploadMeta = Invoke-RestMethod -Uri $uploadUrlApi -Method Get -Headers $headers -ErrorAction Stop
+        $signedUrl = $uploadMeta.url
+        # 将 PSCustomObject 转换为哈希表
+        $uploadHeaders = @{}
+        $uploadMeta.headers.PSObject.Properties | ForEach-Object { $uploadHeaders[$_.Name] = $_.Value }
+
+        Write-Host "[信息] 正在上传安装包（PUT 请求）..."
+        
+        # 使用 HttpClient 进行 PUT 上传，确保二进制流和 headers 正确传递
         Add-Type -AssemblyName System.Net.Http
         $client = New-Object System.Net.Http.HttpClient
-        $client.DefaultRequestHeaders.Add("PRIVATE-TOKEN", $token)
         
-        $multipartContent = New-Object System.Net.Http.MultipartFormDataContent
+        # 添加签名所需的 headers
+        foreach ($key in $uploadHeaders.Keys) {
+            if ($key -eq "Content-Type") { continue } # 由内容类型参数处理
+            $client.DefaultRequestHeaders.Add($key, $uploadHeaders[$key])
+        }
+
         $fileStream = [System.IO.File]::OpenRead((Resolve-Path $exePath))
-        $fileContent = New-Object System.Net.Http.StreamContent($fileStream)
-        $multipartContent.Add($fileContent, "file", (Split-Path $exePath -Leaf))
-        
-        $result = $client.PostAsync($uploadApiUrl, $multipartContent).Result
+        $streamContent = New-Object System.Net.Http.StreamContent($fileStream)
+        # 设置 Content-Type，如果签名 headers 里有则使用，否则用默认的
+        $contentType = if ($uploadHeaders["Content-Type"]) { $uploadHeaders["Content-Type"] } else { "application/octet-stream" }
+        $streamContent.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse($contentType)
+
+        $result = $client.PutAsync($signedUrl, $streamContent).Result
         $resultJson = $result.Content.ReadAsStringAsync().Result
-        
+
         if ($result.IsSuccessStatusCode) {
             Write-Host "[成功] 附件上传成功！" -ForegroundColor Green
             Write-Host "=========================================" -ForegroundColor Cyan
             Write-Host "🎉 发版流程圆满结束！" -ForegroundColor Cyan
             Write-Host "=========================================" -ForegroundColor Cyan
         } else {
-            throw "附件上传失败，服务器返回: $resultJson"
+            throw "附件上传失败（状态码: $($result.StatusCode)），服务器返回: $resultJson"
         }
     } catch {
-        Write-Host "[错误] 上传发生异常: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[错误] 上传过程发生异常: $($_.Exception.Message)" -ForegroundColor Red
     } finally {
         if ($fileStream) { $fileStream.Dispose() }
         if ($client) { $client.Dispose() }
