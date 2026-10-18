@@ -1,4 +1,4 @@
-#define MyAppName "汲湍 (JiTuan)"
+#define MyAppName "姹叉箥 (JiTuan)"
 #define MyAppVersion "0.2.2"
 #define MyAppPublisher "choked-up-now"
 #define MyAppURL "https://atomgit.com/choked-up-now/JiTuan"
@@ -26,7 +26,7 @@ RestartApplications=no
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标:"
+Name: "desktopicon"; Description: "鍒涘缓妗岄潰蹇嵎鏂瑰紡"; GroupDescription: "闄勫姞鍥炬爣:"
 
 [Files]
 Source: "JiTuan_Release\jituan-gui.exe"; DestDir: "{app}"; Components: gui
@@ -35,28 +35,28 @@ Source: "JiTuan_Release\LICENSE"; DestDir: "{app}"; Components: gui or cli
 Source: "JiTuan_Release\NOTICE"; DestDir: "{app}"; Components: gui or cli
 
 [Components]
-; 两者都可选，但需要通过代码拦截
-Name: "gui"; Description: "汲湍 图形界面�?(GUI)"; Types: full compact custom
-Name: "cli"; Description: "汲湍 命令行版 (CLI, 将自动加入系�?PATH)"; Types: full custom
+; 涓よ€呴兘鍙€夛紝浣嗛渶瑕侀€氳繃浠ｇ爜鎷︽埅
+Name: "gui"; Description: "姹叉箥 鍥惧舰鐣岄潰鐗?(GUI)"; Types: full compact custom
+Name: "cli"; Description: "姹叉箥 鍛戒护琛岀増 (CLI, 灏嗚嚜鍔ㄥ姞鍏ョ郴缁?PATH)"; Types: full custom
 
 [Icons]
-Name: "{group}\汲湍"; Filename: "{app}\jituan-gui.exe"; Components: gui
-Name: "{group}\卸载 汲湍"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\汲湍"; Filename: "{app}\jituan-gui.exe"; Tasks: desktopicon; Components: gui
+Name: "{group}\姹叉箥"; Filename: "{app}\jituan-gui.exe"; Components: gui
+Name: "{group}\鍗歌浇 姹叉箥"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\姹叉箥"; Filename: "{app}\jituan-gui.exe"; Tasks: desktopicon; Components: gui
 
 [Run]
-Filename: "{app}\jituan-gui.exe"; Description: "立即运行 汲湍"; Flags: nowait postinstall skipifsilent; Components: gui
+Filename: "{app}\jituan-gui.exe"; Description: "绔嬪嵆杩愯 姹叉箥"; Flags: nowait postinstall skipifsilent; Components: gui
 
 [Code]
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  // 拦截“选择组件”页面的下一步动�?
+  // 鎷︽埅鈥滈€夋嫨缁勪欢鈥濋〉闈㈢殑涓嬩竴姝ュ姩浣?
   if CurPageID = wpSelectComponents then
   begin
     if (not WizardIsComponentSelected('gui')) and (not WizardIsComponentSelected('cli')) then
     begin
-      MsgBox('必须至少安装一个组件（图形界面版或命令行版）！', mbError, MB_OK);
+      MsgBox('蹇呴』鑷冲皯瀹夎涓€涓粍浠讹紙鍥惧舰鐣岄潰鐗堟垨鍛戒护琛岀増锛夛紒', mbError, MB_OK);
       Result := False;
     end;
   end;
