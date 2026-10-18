@@ -16,7 +16,6 @@ struct AtomGitAsset {
 }
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-// AtomGit API 地址
 const UPDATE_API_URL: &str = "https://api.atomgit.com/api/v5/repos/choked-up-now/JiTuan/releases";
 
 pub async fn check_update() -> Result<Option<(String, String)>> {
@@ -33,7 +32,6 @@ pub async fn check_update() -> Result<Option<(String, String)>> {
         return Ok(None);
     }
 
-    // 解析列表，取最新
     let releases: Vec<AtomGitRelease> = resp.json().await?;
     
     if let Some(latest) = releases.first() {
@@ -69,7 +67,6 @@ pub async fn download_and_install(url: &str) -> Result<()> {
         use std::os::windows::process::CommandExt;
         let mut cmd = std::process::Command::new(&path);
         
-        // 静默安装，关闭应用，且【不创建桌面快捷方式】
         cmd.args([
             "/SILENT", 
             "/CLOSEAPPLICATIONS", 
@@ -77,19 +74,15 @@ pub async fn download_and_install(url: &str) -> Result<()> {
             "/MERGETASKS=\"!desktopicon\""
         ]);
         
-        // 屏蔽所有输出，防止黑框
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::null());
         cmd.stdin(std::process::Stdio::null());
 
-        // CREATE_NO_WINDOW | DETACHED_PROCESS
         cmd.creation_flags(0x08000000 | 0x00000008); 
         let _ = cmd.spawn();
     }
 
-    // 给安装程序留出接管时间
     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     
-    // 退出当前进程
     std::process::exit(0);
 }

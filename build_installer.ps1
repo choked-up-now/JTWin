@@ -15,7 +15,7 @@ try {
     $tag = "v${version}"
     Write-Host "[信息] 当前版本: $tag"
 
-    # 2. 同步版本号到 .iss（修复读取时的编码丢失）
+    # 2. 同步版本号到 .iss
     Write-Host "[信息] 正在同步版本号到安装脚本..."
     $issPath = "installer\JiTuan.iss"
     if (-not (Test-Path $issPath)) { throw "找不到 $issPath 文件！" }
@@ -74,10 +74,17 @@ try {
     $releaseApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases"
 
     Write-Host "[信息] 正在创建 Release..."
+    
+    $notesPath = "release_notes.md"
+    $releaseBody = "Auto build by pipeline."
+    if (Test-Path $notesPath) {
+        $releaseBody = [System.IO.File]::ReadAllText((Resolve-Path $notesPath), [System.Text.Encoding]::UTF8)
+    }
+
     $body = @{
         tag_name = $tag
         name     = "JiTuan $tag"
-        body     = "Auto build by pipeline."
+        body     = $releaseBody
     } | ConvertTo-Json
 
     try {
@@ -91,7 +98,6 @@ try {
         }
     }
 
-    # 签名两步法上传附件
     $fileName = Split-Path $exePath -Leaf
     Write-Host "[信息] 正在获取附件上传地址..."
     $uploadUrlApi = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}/upload_url?file_name=${fileName}"
