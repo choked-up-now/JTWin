@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
 echo =========================================
-echo 汲湍 (JiTuan) 自动构建与发布流水线
+echo 汲湍 (JiTuan) 自动构建与发布流水线 (调试版)
 echo =========================================
 
-:: 1. 提取 Cargo.toml 里的版本号，并自动同步到 .iss
+:: 1. 提取 Cargo.toml 里的版本号
 for /f "tokens=2 delims== " %%i in ('findstr "^version" Cargo.toml') do set VERSION=%%i
 set VERSION=%VERSION:"=%
 set TAG=v%VERSION%
@@ -12,6 +12,11 @@ echo [信息] 当前版本: %TAG%
 
 echo [信息] 正在同步版本号到安装脚本...
 powershell -NoProfile -Command "(Get-Content 'installer\JiTuan.iss') -replace '#define MyAppVersion \".*\"', '#define MyAppVersion \"%VERSION%\"' | Set-Content 'installer\JiTuan.iss'"
+if %errorlevel% neq 0 (
+    echo ❌ 同步版本号失败！
+    pause
+    exit /b
+)
 
 :: 2. 编译 Release 版本
 echo.
@@ -43,16 +48,27 @@ if %errorlevel% neq 0 (
 )
 
 set EXE_PATH=installer\Output\JiTuan_%TAG%_Setup.exe
+if not exist "%EXE_PATH%" (
+    echo ❌ 找不到生成的安装包：%EXE_PATH%
+    pause
+    exit /b
+)
 
 :: 5. 执行 Git 提交并推送
 echo.
 echo [4/5] 正在推送到 AtomGit...
 git add .
-git commit -m "chore: release %TAG%"
-:: 强制覆盖已有的 Tag，防止报错
+git diff-index --quiet HEAD
+if %errorlevel% neq 0 (
+    echo [Git] 发现文件变更，正在提交...
+    git commit -m "chore: release %TAG%"
+) else (
+    echo [Git] 没有文件变更，跳过提交。
+)
+
+echo [Git] 强制打标签并推送...
 git tag -f %TAG%
 git push origin main
-:: 强制覆盖远程 Tag
 git push origin -f %TAG%
 
 :: 6. 全自动发布到 AtomGit Release
@@ -65,7 +81,7 @@ if not exist "..\secret.txt" (
     exit /b
 )
 
-:: 读取 Token 并去除换行/空格
+echo [信息] 正在读取 Token...
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$t = (Get-Content '..\secret.txt' -Raw).Trim(); if ($t -match '^\xEF\xBB\xBF') { $t = $t.Substring(1) }; $t"`) do set ATOMGIT_TOKEN=%%i
 
 if "%ATOMGIT_TOKEN%"=="" (
@@ -74,7 +90,6 @@ if "%ATOMGIT_TOKEN%"=="" (
     exit /b
 )
 
-:: 打印 Token 前 5 位，确认是否读取成功 (脱敏保护)
 set TOKEN_PREVIEW=%ATOMGIT_TOKEN:~0,5%
 echo [信息] 成功读取 Token，前 5 位: %TOKEN_PREVIEW%***
 
@@ -82,10 +97,9 @@ set REPO_OWNER=choked-up-now
 set REPO_NAME=JiTuan
 set API_URL=https://atomgit.com/api/v5/repos/%REPO_OWNER%/%REPO_NAME%/releases
 
-:: 创建 JSON 数据
+echo [信息] 正在请求创建 Release API...
 echo {"tag_name":"%TAG%","name":"JiTuan %TAG%","body":"Auto build by pipeline."} > temp_release.json
 
-:: 请求 API
 curl -s -X POST "%API_URL%" -H "Content-Type: application/json" -H "Authorization: token %ATOMGIT_TOKEN%" -d @temp_release.json -o temp_resp.json
 del temp_release.json
 
