@@ -4,11 +4,14 @@ echo =========================================
 echo 汲湍 (JiTuan) 自动构建与发布流水线
 echo =========================================
 
-:: 1. 自动提取 Cargo.toml 里的版本号
+:: 1. 提取 Cargo.toml 里的版本号，并自动同步到 .iss
 for /f "tokens=2 delims== " %%i in ('findstr "^version" Cargo.toml') do set VERSION=%%i
 set VERSION=%VERSION:"=%
 set TAG=v%VERSION%
 echo [信息] 当前版本: %TAG%
+
+echo [信息] 正在同步版本号到安装脚本...
+powershell -NoProfile -Command "(Get-Content 'installer\JiTuan.iss') -replace '#define MyAppVersion \".*\"', '#define MyAppVersion \"%VERSION%\"' | Set-Content 'installer\JiTuan.iss'"
 
 :: 2. 编译 Release 版本
 echo.
@@ -54,51 +57,61 @@ git push origin %TAG%
 echo.
 echo [5/5] 正在创建 AtomGit Release 并上传附件...
 
-:: 读取上一级目录的 secret.txt
 if not exist "..\secret.txt" (
-    echo ⚠️ 未找到 ..\secret.txt，跳过自动发布。
+    echo [警告] 未找到 ..\secret.txt，跳过自动发布。
     pause
     exit /b
 )
 
-:: 使用 PowerShell 提取 Token 并去除空白字符
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "(Get-Content '..\secret.txt' -Raw).Trim()"`) do set ATOMGIT_TOKEN=%%i
+:: 读取 Token 并去除换行/空格/BOM
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$t = (Get-Content '..\secret.txt' -Raw).Trim(); if ($t -match '^\xEF\xBB\xBF') { $t = $t.Substring(1) }; $t"`) do set ATOMGIT_TOKEN=%%i
+
+if "%ATOMGIT_TOKEN%"=="" (
+    echo [错误] 读取 Token 失败，请检查 secret.txt 文件。
+    pause
+    exit /b
+)
 
 set REPO_OWNER=choked-up-now
 set REPO_NAME=JiTuan
 set API_URL=https://atomgit.com/api/v5/repos/%REPO_OWNER%/%REPO_NAME%/releases
 
-:: 使用 curl 发送 POST 请求创建 Release (生成临时 json 文件避免转义问题)
-echo {"tag_name":"%TAG%","name":"汲湍 %TAG% 发布","body":"本次更新由自动化流水线自动构建。"} > temp_release.json
+:: 创建 JSON 数据
+echo {"tag_name":"%TAG%","name":"JiTuan %TAG%","body":"Auto build by pipeline."} > temp_release.json
+
+:: 请求 API
 curl -s -X POST "%API_URL%" -H "Content-Type: application/json" -H "Authorization: token %ATOMGIT_TOKEN%" -d @temp_release.json -o temp_resp.json
 del temp_release.json
 
-:: 使用 PowerShell 从 JSON 响应中提取 Release ID
-for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "(Get-Content temp_resp.json -Raw | ConvertFrom-Json).id"`) do set RELEASE_ID=%%i
-del temp_resp.json
+:: 解析 JSON 获取 ID
+for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$json = Get-Content 'temp_resp.json' -Raw | ConvertFrom-Json; if ($json.id) { $json.id }"`) do set RELEASE_ID=%%i
 
 if "%RELEASE_ID%"=="" (
-    echo ❌ 创建 Release 失败，请检查 Token 权限或 API 是否更改。
-    echo 可能是该版本已存在，请去网页端检查。
+    echo.
+    echo [错误] 创建 Release 失败，以下是服务器返回信息:
+    type temp_resp.json
+    echo.
+    del temp_resp.json
     pause
     exit /b
 )
+del temp_resp.json
 
-echo ✅ Release 创建成功 (ID: %RELEASE_ID%)，正在上传安装包...
+echo [成功] Release 创建成功 (ID: %RELEASE_ID%)，正在上传安装包...
 
-:: 使用 curl 上传附件
 set UPLOAD_URL=https://atomgit.com/api/v5/repos/%REPO_OWNER%/%REPO_NAME%/releases/%RELEASE_ID%/attach_files
 curl -s -X POST "%UPLOAD_URL%" -H "Authorization: token %ATOMGIT_TOKEN%" -F "file=@%EXE_PATH%" -o temp_upload.json
 
 findstr "browser_download_url" temp_upload.json >nul
 if %errorlevel% equ 0 (
-    echo ✅ 附件上传成功！
-    echo 🎉 发版流程圆满结束！
+    echo [成功] 附件上传成功！
+    echo =========================================
+    echo 发版流程圆满结束！
+    echo =========================================
 ) else (
-    echo ❌ 附件上传失败，返回信息:
+    echo [错误] 附件上传失败，返回信息:
     type temp_upload.json
 )
 del temp_upload.json
 
-echo =========================================
 pause

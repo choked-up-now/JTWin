@@ -1,5 +1,5 @@
 #define MyAppName "汲湍 (JiTuan)"
-#define MyAppVersion "0.2.1"
+#define MyAppVersion "0.2.2"
 #define MyAppPublisher "choked-up-now"
 #define MyAppURL "https://atomgit.com/choked-up-now/JiTuan"
 
@@ -36,8 +36,8 @@ Source: "JiTuan_Release\NOTICE"; DestDir: "{app}"; Components: gui or cli
 
 [Components]
 ; 两者都可选，但需要通过代码拦截
-Name: "gui"; Description: "汲湍 图形界面版 (GUI)"; Types: full compact custom
-Name: "cli"; Description: "汲湍 命令行版 (CLI, 将自动加入系统 PATH)"; Types: full custom
+Name: "gui"; Description: "汲湍 图形界面�?(GUI)"; Types: full compact custom
+Name: "cli"; Description: "汲湍 命令行版 (CLI, 将自动加入系�?PATH)"; Types: full custom
 
 [Icons]
 Name: "{group}\汲湍"; Filename: "{app}\jituan-gui.exe"; Components: gui
@@ -51,7 +51,7 @@ Filename: "{app}\jituan-gui.exe"; Description: "立即运行 汲湍"; Flags: now
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  // 拦截“选择组件”页面的下一步动作
+  // 拦截“选择组件”页面的下一步动�?
   if CurPageID = wpSelectComponents then
   begin
     if (not WizardIsComponentSelected('gui')) and (not WizardIsComponentSelected('cli')) then
