@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo =========================================
-echo 汲湍 (JiTuan) 自动构建与发布流水线 (调试版)
+echo 汲湍 (JiTuan) 自动构建与发布流水线
 echo =========================================
 
 :: 1. 提取 Cargo.toml 里的版本号
@@ -11,12 +11,8 @@ set TAG=v%VERSION%
 echo [信息] 当前版本: %TAG%
 
 echo [信息] 正在同步版本号到安装脚本...
+:: 自动修改 JiTuan.iss 中的 MyAppVersion
 powershell -NoProfile -Command "(Get-Content 'installer\JiTuan.iss') -replace '#define MyAppVersion \".*\"', '#define MyAppVersion \"%VERSION%\"' | Set-Content 'installer\JiTuan.iss'"
-if %errorlevel% neq 0 (
-    echo ❌ 同步版本号失败！
-    pause
-    exit /b
-)
 
 :: 2. 编译 Release 版本
 echo.
@@ -58,6 +54,7 @@ if not exist "%EXE_PATH%" (
 echo.
 echo [4/5] 正在推送到 AtomGit...
 git add .
+:: 检查是否有未提交的变更
 git diff-index --quiet HEAD
 if %errorlevel% neq 0 (
     echo [Git] 发现文件变更，正在提交...
@@ -75,13 +72,15 @@ git push origin -f %TAG%
 echo.
 echo [5/5] 正在创建 AtomGit Release 并上传附件...
 
+:: 修复了这里的报错，去掉了英文括号
 if not exist "..\secret.txt" (
-    echo ⚠️ 未找到 ..\secret.txt (在上一级目录)，跳过自动发布。
+    echo ⚠️ 未找到 ..\secret.txt 在上一级目录，跳过自动发布。
     pause
     exit /b
 )
 
 echo [信息] 正在读取 Token...
+:: 安全地读取 Token 并去除 BOM 头或空格
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$t = (Get-Content '..\secret.txt' -Raw).Trim(); if ($t -match '^\xEF\xBB\xBF') { $t = $t.Substring(1) }; $t"`) do set ATOMGIT_TOKEN=%%i
 
 if "%ATOMGIT_TOKEN%"=="" (
@@ -100,10 +99,11 @@ set API_URL=https://atomgit.com/api/v5/repos/%REPO_OWNER%/%REPO_NAME%/releases
 echo [信息] 正在请求创建 Release API...
 echo {"tag_name":"%TAG%","name":"JiTuan %TAG%","body":"Auto build by pipeline."} > temp_release.json
 
+:: 发送请求
 curl -s -X POST "%API_URL%" -H "Content-Type: application/json" -H "Authorization: token %ATOMGIT_TOKEN%" -d @temp_release.json -o temp_resp.json
 del temp_release.json
 
-:: 解析 JSON 获取 ID
+:: 解析返回的 JSON 获取 ID
 for /f "usebackq delims=" %%i in (`powershell -NoProfile -Command "$json = Get-Content 'temp_resp.json' -Raw | ConvertFrom-Json; if ($json.id) { $json.id }"`) do set RELEASE_ID=%%i
 
 if "%RELEASE_ID%"=="" (
@@ -122,6 +122,7 @@ echo [成功] Release 创建成功 (ID: %RELEASE_ID%)，正在上传安装包...
 set UPLOAD_URL=https://atomgit.com/api/v5/repos/%REPO_OWNER%/%REPO_NAME%/releases/%RELEASE_ID%/attach_files
 curl -s -X POST "%UPLOAD_URL%" -H "Authorization: token %ATOMGIT_TOKEN%" -F "file=@%EXE_PATH%" -o temp_upload.json
 
+:: 检查是否上传成功
 findstr "browser_download_url" temp_upload.json >nul
 if %errorlevel% equ 0 (
     echo [成功] 附件上传成功！
