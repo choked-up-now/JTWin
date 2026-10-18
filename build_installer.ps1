@@ -10,19 +10,18 @@ try {
     # 1. 提取 Cargo.toml 里的版本号
     $cargoToml = Get-Content "Cargo.toml" -Raw
     $versionMatch = [regex]::Match($cargoToml, '(?m)^version\s*=\s*"(.*?)"')
-    if (-not $versionMatch.Success) {
-        throw "无法从 Cargo.toml 读取版本号，请检查格式。"
-    }
+    if (-not $versionMatch.Success) { throw "无法从 Cargo.toml 读取版本号" }
+    
     $version = $versionMatch.Groups[1].Value
-    $tag = "v$version"
+    # 使用 ${} 防解析错误
+    $tag = "v${version}"
     Write-Host "[信息] 当前版本: $tag"
 
     # 2. 同步版本号到 installer/JiTuan.iss
     Write-Host "[信息] 正在同步版本号到安装脚本..."
     $issPath = "installer\JiTuan.iss"
-    if (-not (Test-Path $issPath)) {
-        throw "找不到 $issPath 文件！"
-    }
+    if (-not (Test-Path $issPath)) { throw "找不到 $issPath 文件！" }
+    
     $issContent = Get-Content $issPath -Raw
     $issContent = $issContent -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
     [System.IO.File]::WriteAllText((Resolve-Path $issPath), $issContent, (New-Object System.Text.UTF8Encoding($true)))
@@ -83,7 +82,8 @@ try {
     $apiBase = "https://api.atomgit.com/api/v5"
     $repoOwner = "choked-up-now"
     $repoName = "JiTuan"
-    $releaseApiUrl = "$apiBase/repos/$repoOwner/$repoName/releases"
+    # 所有拼接都加上 ${}
+    $releaseApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases"
 
     Write-Host "[信息] 正在请求创建 Release API..."
     $body = @{
@@ -101,21 +101,25 @@ try {
         $errResponse = $_.Exception.Response
         if ($errResponse.StatusCode -eq [System.Net.HttpStatusCode]::Conflict) {
             Write-Host "[警告] Release 已存在，尝试获取已有 ID..." -ForegroundColor Yellow
-            # 【核心修改】获取列表，而不是获取单个 tags
-            $listApiUrl = "$apiBase/repos/$repoOwner/$repoName/releases?per_page=100"
+            $tagApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/tags/${tag}"
             try {
+                # 为了兼容，请求后直接解析
                 $existing = Invoke-RestMethod -Uri $tagApiUrl -Method Get -Headers $headers -ErrorAction Stop
-                # 打印出具体的 JSON 结构
-                Write-Host "--- [调试] AtomGit 返回的数据 ---" -ForegroundColor Magenta
-                $existing | ConvertTo-Json -Depth 3 | Write-Host -ForegroundColor Gray
-                Write-Host "--------------------------------" -ForegroundColor Magenta
                 
-                # 尝试兼容不同平台可能的不同字段名
-                if ($existing.id) { $releaseId = $existing.id }
-                elseif ($existing.release_id) { $releaseId = $existing.release_id }
-                elseif ($existing.data -and $existing.data.id) { $releaseId = $existing.data.id }
-                
-                Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
+                # AtomGit / Gitee 的返回可能是对象，也可能带有 data
+                if ($existing.id) {
+                    $releaseId = $existing.id
+                } elseif ($existing.data -and $existing.data.id) {
+                    $releaseId = $existing.data.id
+                }
+
+                if ($releaseId) {
+                    Write-Host "[成功] 获取已有 Release 成功！ID: $releaseId" -ForegroundColor Green
+                } else {
+                    # 打印一下看看 JSON 长啥样
+                    Write-Host "调试信息: `n$($existing | ConvertTo-Json -Depth 3)" -ForegroundColor Gray
+                    throw "请求成功，但未能解析出 Release ID"
+                }
             } catch {
                 throw "无法获取已有 Release: $($_.Exception.Message)"
             }
@@ -128,7 +132,7 @@ try {
 
     # 8. 上传附件
     Write-Host "[信息] 正在上传安装包 $exePath ..."
-    $uploadApiUrl = "$apiBase/repos/$repoOwner/$repoName/releases/$releaseId/attach_files"
+    $uploadApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${releaseId}/attach_files"
 
     try {
         Add-Type -AssemblyName System.Net.Http
