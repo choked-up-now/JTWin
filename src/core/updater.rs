@@ -16,7 +16,8 @@ struct AtomGitAsset {
 }
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const UPDATE_API_URL: &str = "https://api.atomgit.com/api/v5/repos/choked-up-now/JiTuan/releases";
+// 【修复】改为 JiTuan-win 仓库的 API
+const UPDATE_API_URL: &str = "https://api.atomgit.com/api/v5/repos/choked-up-now/JiTuan-win/releases";
 
 pub async fn check_update() -> Result<Option<(String, String)>> {
     let client = reqwest::Client::builder()

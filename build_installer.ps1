@@ -60,7 +60,8 @@ try {
     $token = (Get-Content $secretPath -Raw).Trim()
     if ([string]::IsNullOrEmpty($token)) { throw "读取 Token 失败，secret.txt 内容为空。" }
 
-    $pushUrl = "https://oauth2:${token}@atomgit.com/choked-up-now/JiTuan.git"
+    # 【修复】推送地址改为 JiTuan-win
+    $pushUrl = "https://oauth2:${token}@atomgit.com/choked-up-now/JiTuan-win.git"
     git push $pushUrl main -f
     git push $pushUrl $tag -f
     if ($LASTEXITCODE -ne 0) {
@@ -75,7 +76,8 @@ try {
     $headers = @{ "PRIVATE-TOKEN" = $token }
     $apiBase = "https://api.atomgit.com/api/v5"
     $repoOwner = "choked-up-now"
-    $repoName = "JiTuan"
+    # 【修复】仓库名改为 JiTuan-win
+    $repoName = "JiTuan-win"
     $releaseApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases"
 
     Write-Host "[信息] 正在创建 Release..."
