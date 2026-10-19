@@ -60,7 +60,7 @@ try {
     $token = (Get-Content $secretPath -Raw).Trim()
     if ([string]::IsNullOrEmpty($token)) { throw "读取 Token 失败，secret.txt 内容为空。" }
 
-    # 【修复】推送地址改为 JiTuan-win
+    # 使用 Token 推送到 JiTuan-win 仓库
     $pushUrl = "https://oauth2:${token}@atomgit.com/choked-up-now/JiTuan-win.git"
     git push $pushUrl main -f
     git push $pushUrl $tag -f
@@ -76,7 +76,6 @@ try {
     $headers = @{ "PRIVATE-TOKEN" = $token }
     $apiBase = "https://api.atomgit.com/api/v5"
     $repoOwner = "choked-up-now"
-    # 【修复】仓库名改为 JiTuan-win
     $repoName = "JiTuan-win"
     $releaseApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases"
 
@@ -90,20 +89,24 @@ try {
 
     $dateStr = Get-Date -Format "yyyyMMdd"
     $releaseTitle = "汲湍 $tag $dateStr"
+    
+    # 获取当前 commit 作为 target_commitish（AtomGit 必填项）
+    $latestCommit = (git rev-parse HEAD).Trim()
 
     $body = @{
-        tag_name       = $tag
-        name           = $releaseTitle
-        body           = $releaseBody
-        prerelease     = $false
-        release_status = "latest"
+        tag_name         = $tag
+        name             = $releaseTitle
+        body             = $releaseBody
+        target_commitish = $latestCommit
+        release_status   = "latest"
     } | ConvertTo-Json
 
     try {
         $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop
         Write-Host "[成功] Release 创建成功并标记为最新！" -ForegroundColor Green
     } catch {
-        if ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::Conflict) {
+        $statusCode = $_.Exception.Response.StatusCode.value__
+        if ($statusCode -eq 409) {
             Write-Host "[警告] Release 已存在，正在尝试更新已有 Release 标记..." -ForegroundColor Yellow
             $updateApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}"
             try {
@@ -112,10 +115,9 @@ try {
             } catch {
                 Write-Host "[警告] 无法更新已有 Release 标记，继续执行上传。" -ForegroundColor Yellow
             }
-        } elseif ($_.Exception.Response.StatusCode -eq [System.Net.HttpStatusCode]::BadRequest) {
-            $errStream = $_.Exception.Response.GetResponseStream()
-            $reader = New-Object System.IO.StreamReader($errStream)
-            $errBody = $reader.ReadToEnd()
+        } elseif ($statusCode -eq 400) {
+            # 直接提取 ErrorDetails，避免空流导致的死胡同
+            $errBody = $_.ErrorDetails.Message
             Write-Host "❌ [400 详细错误] $errBody" -ForegroundColor Red
             throw "创建 Release 失败，400 错误详情已打印在上方。"
         } else {
