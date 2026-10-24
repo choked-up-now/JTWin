@@ -4,4 +4,5 @@ pub mod core {
     pub mod scheduler;
     pub mod storage;
     pub mod updater;
+    pub mod mirror;
 }

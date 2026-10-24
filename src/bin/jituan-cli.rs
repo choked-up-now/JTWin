@@ -1,5 +1,5 @@
 use clap::Parser;
-use jituan_core::core::{engine, models::{Task, TaskStatus}, scheduler::Scheduler, storage, updater};
+use jituan_core::core::{engine, models::{Task, TaskStatus}, scheduler::Scheduler, storage, updater, mirror};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -7,20 +7,17 @@ use tokio::sync::Mutex;
 #[derive(Parser, Debug)]
 #[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器")]
 struct Args {
-    /// 下载链接 (使用 --update 时可省略)
     url: Option<String>, 
-    
-    /// 保存文件名 (可选，默认保存到系统的下载文件夹)
     #[arg(short, long)]
     output: Option<String>,
-    
-    /// 初始并发分片数 (默认 16)
     #[arg(short, long, default_value_t = 16)]
     connections: usize,
-
-    /// 检查并更新到最新版本
     #[arg(short, long)]
     update: bool,
+    #[arg(long)]
+    no_mirror: bool,
+    #[arg(long)]
+    alpha: bool,
 }
 
 #[tokio::main]
@@ -29,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
 
     if args.update {
         println!("正在检查更新...");
-        match updater::check_update().await {
+        match updater::check_update(args.alpha).await {
             Ok(Some((new_ver, url))) => {
                 println!("发现新版本 v{}，正在下载安装包...", new_ver);
                 updater::download_and_install(&url).await?;
@@ -47,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let url = match args.url {
+    let raw_url = match args.url {
         Some(u) => u,
         None => {
             eprintln!("错误：请提供下载链接，或使用 --update 检查更新。");
@@ -55,10 +52,23 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let _url_clone = url.clone();
+    let url = if args.no_mirror {
+        raw_url.clone()
+    } else {
+        println!("[镜像] 正在智能测速选择最优节点...");
+        let best = mirror::get_fastest_mirror(&raw_url).await;
+        if best != raw_url {
+            println!("[镜像] 已自动切换至: {}", best);
+        } else {
+            println!("[镜像] 测速完成，使用原站");
+        }
+        best
+    };
+
+    let allow_alpha = args.alpha;
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if let Ok(Some((new_ver, _))) = updater::check_update().await {
+        if let Ok(Some((new_ver, _))) = updater::check_update(allow_alpha).await {
             println!("\n\x1b[33m[提示] 发现汲湍新版本 v{}，可使用 `jituan-cli --update` 升级。\x1b[0m", new_ver);
         }
     });

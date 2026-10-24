@@ -1,6 +1,6 @@
 [package]
 name = "jituan"
-version = "0.2.6"
+version = "0.3.0"
 edition = "2024"
 
 [lib]
@@ -29,6 +29,7 @@ tempfile = "3.20.0"
 dirs = "5.0"
 rfd = "0.14"
 opener = "0.7"
+regex = "1.11"
 
 # 可选依赖
 clap = { version = "4.5", features = ["derive"], optional = true }

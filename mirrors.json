@@ -1,0 +1,26 @@
+[
+  {
+    "name": "GitHub 加速",
+    "target": "https://github.com/*",
+    "mirrors": [
+      "https://ghproxy.net/https://github.com/*",
+      "https://mirror.ghproxy.com/https://github.com/*",
+      "https://github.com/*"
+    ]
+  },
+  {
+    "name": "Raw 文件加速",
+    "target": "https://raw.githubusercontent.com/*",
+    "mirrors": [
+      "https://raw.gitmirror.com/*",
+      "https://ghproxy.net/https://raw.githubusercontent.com/*"
+    ]
+  },
+  {
+    "name": "对象存储加速",
+    "target": "https://objects.githubusercontent.com/*",
+    "mirrors": [
+      "https://ghproxy.net/https://objects.githubusercontent.com/*"
+    ]
+  }
+]

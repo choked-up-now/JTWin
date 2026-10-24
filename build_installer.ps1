@@ -60,7 +60,6 @@ try {
     $token = (Get-Content $secretPath -Raw).Trim()
     if ([string]::IsNullOrEmpty($token)) { throw "读取 Token 失败，secret.txt 内容为空。" }
 
-    # 使用 Token 推送到 JiTuan-win 仓库
     $pushUrl = "https://oauth2:${token}@atomgit.com/choked-up-now/JiTuan-win.git"
     git push $pushUrl main -f
     git push $pushUrl $tag -f
@@ -90,19 +89,21 @@ try {
     $dateStr = Get-Date -Format "yyyyMMdd"
     $releaseTitle = "汲湍 $tag $dateStr"
     
-    # 获取当前 commit 作为 target_commitish（AtomGit 必填项）
     $latestCommit = (git rev-parse HEAD).Trim()
 
-    $body = @{
+    $bodyObject = @{
         tag_name         = $tag
         name             = $releaseTitle
         body             = $releaseBody
         target_commitish = $latestCommit
         release_status   = "latest"
-    } | ConvertTo-Json
+    }
+    
+    $jsonBody = $bodyObject | ConvertTo-Json -Depth 10
+    $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonBody)
 
     try {
-        $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop
+        $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Bytes -ErrorAction Stop
         Write-Host "[成功] Release 创建成功并标记为最新！" -ForegroundColor Green
     } catch {
         $statusCode = $_.Exception.Response.StatusCode.value__
@@ -110,13 +111,12 @@ try {
             Write-Host "[警告] Release 已存在，正在尝试更新已有 Release 标记..." -ForegroundColor Yellow
             $updateApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}"
             try {
-                $patchResponse = Invoke-RestMethod -Uri $updateApiUrl -Method Patch -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop
+                $patchResponse = Invoke-RestMethod -Uri $updateApiUrl -Method Patch -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Bytes -ErrorAction Stop
                 Write-Host "[成功] 已有 Release 已更新并标记为最新！" -ForegroundColor Green
             } catch {
                 Write-Host "[警告] 无法更新已有 Release 标记，继续执行上传。" -ForegroundColor Yellow
             }
         } elseif ($statusCode -eq 400) {
-            # 直接提取 ErrorDetails，避免空流导致的死胡同
             $errBody = $_.ErrorDetails.Message
             Write-Host "❌ [400 详细错误] $errBody" -ForegroundColor Red
             throw "创建 Release 失败，400 错误详情已打印在上方。"

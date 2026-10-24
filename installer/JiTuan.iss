@@ -1,7 +1,10 @@
 ﻿#define MyAppName "汲湍 (JiTuan)"
-#define MyAppVersion "0.2.6"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "choked-up-now"
-#define MyAppURL "https://atomgit.com/choked-up-now/JiTuan"
+#define MyAppURL "https://atomgit.com/choked-up-now/JiTuan-win"
+
+; 如果需要加载私库美化资源，取消下面这行的注释（确保路径正确）
+; #include "..\..\..\HeXvWizardUI\theme_config.iss"
 
 [Setup]
 AppId={{D3C9F88A-7F1B-4C1A-9B2A-8A2C5F6D7E8B}
@@ -17,7 +20,8 @@ OutputDir=Output
 OutputBaseFilename=JiTuan_v{#MyAppVersion}_Setup
 Compression=lzma
 SolidCompression=yes
-WizardStyle=modern
+; 【此处改为冰原风格】
+WizardStyle=polar
 PrivilegesRequired=admin
 CloseApplications=yes
 RestartApplications=no
@@ -27,6 +31,7 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标:"
+Name: "internal_editor"; Description: "使用汲湍内置的 JSON 编辑器 (推荐)"; GroupDescription: "镜像规则编辑器偏好:"; Flags: checkedonce
 
 [Files]
 Source: "JiTuan_Release\jituan-gui.exe"; DestDir: "{app}"; Components: gui
@@ -64,6 +69,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   OldPath: string;
   NewPath: string;
+  AppDataDir: string;
+  FlagFile: string;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -77,6 +84,22 @@ begin
           RegWriteExpandStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', NewPath);
         end;
       end;
+    end;
+
+    AppDataDir := ExpandConstant('{userappdata}\JiTuan');
+    if not DirExists(AppDataDir) then
+      ForceDirectories(AppDataDir);
+      
+    FlagFile := AppDataDir + '\use_internal_editor.flag';
+    
+    if WizardIsTaskSelected('internal_editor') then
+    begin
+      SaveStringToFile(FlagFile, '1', False);
+    end
+    else
+    begin
+      if FileExists(FlagFile) then
+        DeleteFile(FlagFile);
     end;
   end;
 end;

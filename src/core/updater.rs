@@ -16,10 +16,9 @@ struct AtomGitAsset {
 }
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-// 【修复】改为 JiTuan-win 仓库的 API
 const UPDATE_API_URL: &str = "https://api.atomgit.com/api/v5/repos/choked-up-now/JiTuan-win/releases";
 
-pub async fn check_update() -> Result<Option<(String, String)>> {
+pub async fn check_update(allow_alpha: bool) -> Result<Option<(String, String)>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
@@ -42,10 +41,14 @@ pub async fn check_update() -> Result<Option<(String, String)>> {
     for release in releases {
         let tag_str = release.tag_name.trim_start_matches('v');
         if let Ok(ver) = Version::parse(tag_str) {
+            if !allow_alpha && !ver.pre.is_empty() {
+                continue;
+            }
+
             if ver > best_ver {
                 for asset in &release.assets {
                     if asset.name.ends_with(".exe") {
-                        best_ver = ver;
+                        best_ver = ver.clone();
                         best_download = Some((tag_str.to_string(), asset.browser_download_url.clone()));
                         break;
                     }
