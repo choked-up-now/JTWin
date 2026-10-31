@@ -1,5 +1,10 @@
 use clap::Parser;
-use jituan_core::core::{engine, models::{Task, TaskStatus}, scheduler::Scheduler, storage, updater, mirror, torrent};
+use jituan_core::core::{
+    engine, mirror,
+    models::{Task, TaskStatus},
+    scheduler::Scheduler,
+    storage, torrent, updater,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -8,12 +13,12 @@ use tokio::sync::Mutex;
 #[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器 (支持 HTTP 与 P2P)")]
 struct Args {
     /// 下载链接 (HTTP URL 或 magnet: 磁力链接)
-    url: Option<String>, 
-    
+    url: Option<String>,
+
     /// 保存文件名/目录 (可选，默认保存到系统的下载文件夹)
     #[arg(short, long)]
     output: Option<String>,
-    
+
     /// 初始并发分片数 (默认 16)
     #[arg(short, long, default_value_t = 16)]
     connections: usize,
@@ -67,7 +72,6 @@ async fn main() -> anyhow::Result<()> {
 
     // 获取保存目录
     let save_dir = match args.output {
-        // 【核心修复】去除 PowerShell 可能带上的双引号
         Some(path) => PathBuf::from(path.trim_matches('"')),
         None => {
             dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap())
@@ -91,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
         if let Err(e) = result {
             eprintln!("\n❌ P2P 失败: {}", e);
         }
+        println!();
         return Ok(());
     }
 

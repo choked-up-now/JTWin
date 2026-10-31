@@ -5,5 +5,5 @@ pub mod core {
     pub mod storage;
     pub mod updater;
     pub mod mirror;
-    pub mod torrent; // 新增
+    pub mod torrent;
 }
