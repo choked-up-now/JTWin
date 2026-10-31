@@ -67,7 +67,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 获取保存目录
     let save_dir = match args.output {
-        Some(path) => PathBuf::from(path),
+        // 【核心修复】去除 PowerShell 可能带上的双引号
+        Some(path) => PathBuf::from(path.trim_matches('"')),
         None => {
             dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap())
         }
