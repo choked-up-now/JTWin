@@ -1,5 +1,5 @@
 use clap::Parser;
-use jituan_core::core::{engine, models::{Task, TaskStatus}, scheduler::Scheduler, storage, updater, mirror, torrent}; // 引入 torrent
+use jituan_core::core::{engine, models::{Task, TaskStatus}, scheduler::Scheduler, storage, updater, mirror, torrent};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -7,15 +7,26 @@ use tokio::sync::Mutex;
 #[derive(Parser, Debug)]
 #[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器 (支持 HTTP 与 P2P)")]
 struct Args {
+    /// 下载链接 (HTTP URL 或 magnet: 磁力链接)
     url: Option<String>, 
+    
+    /// 保存文件名/目录 (可选，默认保存到系统的下载文件夹)
     #[arg(short, long)]
     output: Option<String>,
+    
+    /// 初始并发分片数 (默认 16)
     #[arg(short, long, default_value_t = 16)]
     connections: usize,
+
+    /// 检查并更新到最新版本
     #[arg(short, long)]
     update: bool,
+
+    /// 禁用 HTTP 镜像智能加速
     #[arg(long)]
     no_mirror: bool,
+
+    /// 接收预览版 (Alpha/Beta) 更新
     #[arg(long)]
     alpha: bool,
 }
@@ -24,11 +35,14 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    // 1. 处理更新
     if args.update {
-        // ... 更新逻辑保持不变 ...
+        println!("正在检查更新...");
         match updater::check_update(args.alpha).await {
             Ok(Some((new_ver, url))) => {
+                println!("发现新版本 v{}，正在下载安装包...", new_ver);
                 updater::download_and_install(&url).await?;
+                println!("更新程序已启动，当前进程即将退出。");
                 std::process::exit(0);
             }
             Ok(None) => {
@@ -42,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // 2. 获取链接
     let raw_url = match args.url {
         Some(u) => u,
         None => {
@@ -50,17 +65,23 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // 获取保存目录
     let save_dir = match args.output {
         Some(path) => PathBuf::from(path),
-        None => dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap()),
+        None => {
+            dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap())
+        }
     };
     let save_dir_str = save_dir.to_string_lossy().to_string();
 
-    // 【核心新增】P2P 链接分流
+    // ==========================================
+    // 分流 1：P2P 下载 (磁力链接或 .torrent 文件)
+    // ==========================================
     if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
         println!("🌊 汲湍 P2P 引擎启动");
         println!("目标链接: {}", raw_url);
-        
+        println!("保存至: {}", save_dir_str);
+
         let result = torrent::download_p2p(&raw_url, &save_dir_str, |progress, status| {
             print!("\r[{:.2}%] {}", progress * 100.0, status);
             use std::io::Write; std::io::stdout().flush().unwrap();
@@ -72,11 +93,19 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // 原有的 HTTP 逻辑
+    // ==========================================
+    // 分流 2：HTTP 下载
+    // ==========================================
     let url = if args.no_mirror {
         raw_url.clone()
     } else {
+        println!("[镜像] 正在智能测速选择最优节点...");
         let best = mirror::get_fastest_mirror(&raw_url).await;
+        if best != raw_url {
+            println!("[镜像] 已自动切换至: {}", best);
+        } else {
+            println!("[镜像] 测速完成，使用原站");
+        }
         best
     };
 
@@ -96,6 +125,88 @@ async fn main() -> anyhow::Result<()> {
     let meta_path = file_path.with_extension("jtdl");
 
     println!("🌊 汲湍 HTTP 引擎启动");
-    // ... 后续 HTTP 下载逻辑保持不变 ...
+    println!("目标链接: {}", url);
+    println!("保存至: {:?}", file_path);
+
+    let scheduler = Arc::new(Scheduler::new(32, args.connections));
+    let client = reqwest::Client::new();
+
+    let task_arc = if meta_path.exists() {
+        println!("发现未完成任务，正在读取断点 (.jtdl)...");
+        let t = storage::load_task(&meta_path).await?;
+        println!("已恢复进度: {:.2}%", t.progress());
+        Arc::new(Mutex::new(t))
+    } else {
+        let res = client.get(&url).header("Range", "bytes=0-0").send().await?;
+        let total_size = res.headers().get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split('/').nth(1))
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        
+        if total_size == 0 { anyhow::bail!("无法获取文件大小"); }
+        
+        scheduler.register_task();
+        let concurrency = scheduler.calculate_quota();
+        println!("文件大小: {:.2} MB, 分配并发数: {}", total_size as f64 / 1024.0 / 1024.0, concurrency);
+
+        let file = std::fs::File::create(&file_path)?;
+        file.set_len(total_size)?;
+
+        let t = Task::new("cli_task".to_string(), url.clone(), file_path.clone(), total_size, concurrency);
+        storage::save_task(&t).await?;
+        Arc::new(Mutex::new(t))
+    };
+
+    {
+        let mut t = task_arc.lock().await;
+        t.status = TaskStatus::Downloading;
+    }
+
+    let mut handles = vec![];
+    let chunk_count = { task_arc.lock().await.chunks.len() };
+    
+    for i in 0..chunk_count {
+        let is_finished = { task_arc.lock().await.chunks[i].is_finished };
+        if is_finished { continue; }
+
+        let h = tokio::spawn(engine::download_chunk(
+            client.clone(),
+            task_arc.clone(),
+            i,
+            url.clone(),
+            file_path.to_string_lossy().to_string(),
+            scheduler.global_limit.clone(),
+        ));
+        handles.push(h);
+    }
+
+    let task_clone = task_arc.clone();
+    let monitor = tokio::spawn(async move {
+        loop {
+            let t = task_clone.lock().await;
+            print!("\r进度: {:.2}% ({:.2}/{:.2} MB)", 
+                t.progress(), 
+                t.downloaded_bytes() as f64/1024.0/1024.0, 
+                t.total_size as f64/1024.0/1024.0
+            );
+            use std::io::Write; std::io::stdout().flush().unwrap();
+            
+            if t.downloaded_bytes() >= t.total_size { 
+                println!("\n✅ 下载完成！"); 
+                break; 
+            }
+            
+            let _ = storage::save_task(&t).await;
+            
+            drop(t);
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+    });
+
+    for h in handles { h.await??; }
+    let _ = monitor.await;
+    if meta_path.exists() { let _ = tokio::fs::remove_file(meta_path).await; }
+    
     Ok(())
 }
