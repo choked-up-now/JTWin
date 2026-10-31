@@ -108,7 +108,6 @@ impl eframe::App for JituanApp {
                                 let mut to_add_mirror = false;
                                 let mirror_count = m.mirrors.len();
                                 
-                                // 使用索引遍历，避免 Borrow Checker 报错
                                 for j in 0..mirror_count {
                                     ui.horizontal(|ui| {
                                         ui.add_sized([450.0, 20.0], egui::TextEdit::singleline(&mut m.mirrors[j]).hint_text("例: https://ghproxy.net/https://github.com/*"));
@@ -121,7 +120,6 @@ impl eframe::App for JituanApp {
                                     });
                                 }
                                 
-                                // 循环结束后再统一执行增删
                                 if to_add_mirror {
                                     m.mirrors.push(String::new());
                                 }
@@ -266,10 +264,30 @@ impl eframe::App for JituanApp {
                 ui.add_enabled_ui(!self.is_downloading, |ui| {
                     if ui.add_sized([100.0, 30.0], egui::Button::new("开始下载")).clicked() {
                         self.is_downloading = true;
-                        self.status_text = "正在智能测速选择最优镜像...".to_string();
+                        self.status_text = "正在准备下载...".to_string();
                         *self.progress.lock().unwrap() = 0.0; 
                         
                         let raw_url = self.url.clone();
+                        
+                        // 【核心新增】P2P 链接分流
+                        if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
+                            let dir_str = self.save_dir.clone();
+                            let progress_clone = self.progress.clone();
+                            let ctx_clone = ctx.clone();
+                            
+                            std::thread::spawn(move || {
+                                let rt = tokio::runtime::Runtime::new().unwrap();
+                                rt.block_on(async move {
+                                    let _ = jituan_core::core::torrent::download_p2p(&raw_url, &dir_str, move |prog, _status| {
+                                        *progress_clone.lock().unwrap() = prog;
+                                        ctx_clone.request_repaint();
+                                    }).await;
+                                });
+                            });
+                            return; // 截断，不走 HTTP 逻辑
+                        }
+
+                        // 原有的 HTTP 逻辑
                         let use_mirror = self.use_mirror;
                         let file_path = Path::new(&self.save_dir).join(&self.file_name);
                         let file_path_str = file_path.to_string_lossy().to_string();
