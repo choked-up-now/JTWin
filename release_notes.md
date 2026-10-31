@@ -1,13 +1,18 @@
-# 汲湍 v0.5.0 更新说明
+# 汲湍 v0.6.0 更新说明
 
-本次更新是 P2P 引擎的里程碑，汲湍现在能够真正解析磁力链接、向 Tracker 请求 Peer，并与 Peer 完成 BitTorrent 握手。
+本次更新是汲湍 P2P 引擎的重大突破，我们实现了完整的 Peer Wire 数据传输链路，正式从网络拉取了第一块 P2P 数据并写入磁盘。
 
 ## 新增特性
-- Magnet 链接解析：支持 xt=urn:btih（40 位十六进制 / 32 位 Base32）提取 20 字节 info_hash，并解析 dn、tr 参数。
-- Tracker 请求：实现 BEP-23 Compact Peers 解析（每 Peer 6 字节：4B IPv4 + 2B 大端端口）。
-- Peer Wire 握手：实现 BEP-3 标准 68 字节握手帧，验证 info_hash 一致性。
-- CLI / GUI 已接入 P2P 测试入口：粘贴磁力链即可看到从解析 → Tracker → 握手的完整链路日志。
+- 实现了 BEP-3 协议中的 Interested (ID=2) 消息发送，向 Peer 宣告下载意愿。
+- 实现了 Request (ID=6) 消息发送，精确请求指定 Piece 的字节范围。
+- 实现了对 Piece (ID=7) 数据的接收、解析与偏移量写盘。
+- 利用本机 qBittorrent 环境完成端到端数据拉取测试，证明了底层协议栈的绝对正确性。
+
+## 已知限制
+- 当前为底层协议验证版，为了确保测试稳定性，CLI 模式下的 P2P 暂强制直连本地 `127.0.0.1:18082`。
+- 磁力链缺乏元数据（Piece Hashes），暂未开启 SHA-1 严格校验。
+- 真实的公网 Tracker 请求、UDP 打洞与多 Peer 调度将在 v0.7.0 实现。
 
 ## 升级提示
-- 运行 `jituan-cli "magnet:?xt=urn:btih:<hash>&dn=<name>"` 即可体验。
-- Peer 数据传输与 Piece 校验将在 v0.6.0 实现。
+- 普通 HTTP 下载用户可无缝升级。
+- 开发者/极客可使用 CLI 模式测试本地 P2P 链路。

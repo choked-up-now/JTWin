@@ -40,7 +40,6 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // 1. 处理更新
     if args.update {
         println!("正在检查更新...");
         match updater::check_update(args.alpha).await {
@@ -61,7 +60,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // 2. 获取链接
     let raw_url = match args.url {
         Some(u) => u,
         None => {
@@ -70,7 +68,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // 获取保存目录
     let save_dir = match args.output {
         Some(path) => PathBuf::from(path.trim_matches('"')),
         None => {
@@ -79,9 +76,6 @@ async fn main() -> anyhow::Result<()> {
     };
     let save_dir_str = save_dir.to_string_lossy().to_string();
 
-    // ==========================================
-    // 分流 1：P2P 下载 (磁力链接或 .torrent 文件)
-    // ==========================================
     if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
         println!("🌊 汲湍 P2P 引擎启动");
         println!("目标链接: {}", raw_url);
@@ -99,9 +93,6 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // ==========================================
-    // 分流 2：HTTP 下载
-    // ==========================================
     let url = if args.no_mirror {
         raw_url.clone()
     } else {
