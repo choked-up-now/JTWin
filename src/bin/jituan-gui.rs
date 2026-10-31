@@ -25,8 +25,12 @@ struct JituanApp {
     progress: Arc<StdMutex<f32>>,
     is_downloading: bool,
     use_mirror: bool,
+    
+    // 窗口状态
     is_editing_mirrors: bool,
     ui_mirrors: Vec<mirror::MirrorConfig>,
+    is_settings_open: bool, // 新增：设置窗口状态
+    
     allow_alpha: bool,
     update_available: Arc<StdMutex<Option<(String, String)>>>,
     is_checking_update: bool,
@@ -37,10 +41,7 @@ impl Default for JituanApp {
     fn default() -> Self {
         Self {
             url: "https://github.com/choked-up-now/JiTuan-win/releases/download/v0.4.2/JiTuan_v0.4.2_Setup.exe".to_string(),
-            save_dir: dirs::download_dir()
-                .unwrap_or_else(|| std::env::current_dir().unwrap())
-                .to_string_lossy()
-                .to_string(),
+            save_dir: dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap()).to_string_lossy().to_string(),
             file_name: "JiTuan_v0.4.2_Setup.exe".to_string(),
             status_text: "准备就绪".to_string(),
             progress: Arc::new(StdMutex::new(0.0)),
@@ -48,6 +49,7 @@ impl Default for JituanApp {
             use_mirror: true,
             is_editing_mirrors: false,
             ui_mirrors: Vec::new(),
+            is_settings_open: false,
             allow_alpha: false,
             update_available: Arc::new(StdMutex::new(None)),
             is_checking_update: false,
@@ -61,6 +63,7 @@ impl eframe::App for JituanApp {
         let current_progress = *self.progress.lock().unwrap();
         let update_opt = self.update_available.lock().unwrap().clone();
 
+        // 自动检查更新
         if !self.has_checked_update {
             self.has_checked_update = true;
             let ctx_clone = ctx.clone();
@@ -77,6 +80,42 @@ impl eframe::App for JituanApp {
             });
         }
 
+        // ================== 设置窗口 ==================
+        if self.is_settings_open {
+            let mut open = true;
+            egui::Window::new("⚙️ 设置")
+                .open(&mut open)
+                .resizable(false)
+                .collapsible(false)
+                .default_width(320.0)
+                .show(ctx, |ui| {
+                    ui.add_space(5.0);
+                    ui.heading("下载偏好");
+                    ui.separator();
+                    ui.checkbox(&mut self.use_mirror, "启用镜像智能加速");
+                    
+                    if ui.button("管理镜像规则").clicked() {
+                        if mirror::use_internal_editor() {
+                            self.ui_mirrors = mirror::get_mirrors();
+                            self.is_editing_mirrors = true;
+                        } else {
+                            let _ = mirror::get_mirrors_raw();
+                            let _ = opener::open(mirror::get_config_path());
+                        }
+                    }
+
+                    ui.add_space(15.0);
+                    ui.heading("更新通道");
+                    ui.separator();
+                    ui.checkbox(&mut self.allow_alpha, "接收预览版 (Alpha/Beta)");
+                    ui.label("勾选后可提前体验新功能，但可能不稳定。");
+                });
+            if !open {
+                self.is_settings_open = false;
+            }
+        }
+
+        // ================== 镜像编辑窗口 ==================
         if self.is_editing_mirrors {
             let mut open = true;
             egui::Window::new("智能镜像规则管理")
@@ -87,7 +126,7 @@ impl eframe::App for JituanApp {
                 .show(ctx, |ui| {
                     ui.label("说明：不固定位置请用星号 * 占位。下载时会并发测速并选择最快的源。");
                     ui.separator();
-
+                    
                     egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
                         let mut to_remove = None;
                         for (i, m) in self.ui_mirrors.iter_mut().enumerate() {
@@ -100,28 +139,20 @@ impl eframe::App for JituanApp {
                                         to_remove = Some(i);
                                     }
                                 });
-
+                                
                                 ui.horizontal(|ui| {
                                     ui.label("原链接:");
-                                    ui.add_sized(
-                                        [450.0, 20.0],
-                                        egui::TextEdit::singleline(&mut m.target)
-                                            .hint_text("例: https://github.com/*"),
-                                    );
+                                    ui.add_sized([450.0, 20.0], egui::TextEdit::singleline(&mut m.target).hint_text("例: https://github.com/*"));
                                 });
 
                                 ui.label("镜像站分支 (点击右侧 + 添加):");
                                 let mut to_remove_mirror = None;
                                 let mut to_add_mirror = false;
                                 let mirror_count = m.mirrors.len();
-
+                                
                                 for j in 0..mirror_count {
                                     ui.horizontal(|ui| {
-                                        ui.add_sized(
-                                            [450.0, 20.0],
-                                            egui::TextEdit::singleline(&mut m.mirrors[j])
-                                                .hint_text("例: https://ghproxy.net/https://github.com/*"),
-                                        );
+                                        ui.add_sized([450.0, 20.0], egui::TextEdit::singleline(&mut m.mirrors[j]).hint_text("例: https://ghproxy.net/https://github.com/*"));
                                         if ui.button("+").clicked() {
                                             to_add_mirror = true;
                                         }
@@ -130,7 +161,7 @@ impl eframe::App for JituanApp {
                                         }
                                     });
                                 }
-
+                                
                                 if to_add_mirror {
                                     m.mirrors.push(String::new());
                                 }
@@ -154,7 +185,7 @@ impl eframe::App for JituanApp {
                                 mirrors: vec!["https://".to_string()],
                             });
                         }
-
+                        
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui.button("保存并生效").clicked() {
                                 if let Ok(json) = serde_json::to_string_pretty(&self.ui_mirrors) {
@@ -167,21 +198,26 @@ impl eframe::App for JituanApp {
                         });
                     });
                 });
-            if !open {
-                self.is_editing_mirrors = false;
-            }
+            if !open { self.is_editing_mirrors = false; }
         }
 
+        // ================== 主界面 ==================
         egui::CentralPanel::default().show(ctx, |ui| {
+            // 顶部栏
             ui.horizontal(|ui| {
                 ui.heading("🌊 汲湍 (JiTuan)");
+                
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // 设置按钮
+                    if ui.button("⚙️ 设置").clicked() {
+                        self.is_settings_open = true;
+                    }
+                    
+                    ui.separator();
+                    
                     ui.label(format!("v{}", updater::CURRENT_VERSION));
-
-                    if ui
-                        .add_enabled(!self.is_checking_update, egui::Button::new("手动检查"))
-                        .clicked()
-                    {
+                    
+                    if ui.add_enabled(!self.is_checking_update, egui::Button::new("手动检查")).clicked() {
                         self.is_checking_update = true;
                         let ctx_clone = ctx.clone();
                         let update_state = self.update_available.clone();
@@ -189,22 +225,19 @@ impl eframe::App for JituanApp {
                         std::thread::spawn(move || {
                             let rt = tokio::runtime::Runtime::new().unwrap();
                             rt.block_on(async move {
-                                if let Ok(Some((new_ver, url))) =
-                                    updater::check_update(allow_alpha).await
-                                {
+                                if let Ok(Some((new_ver, url))) = updater::check_update(allow_alpha).await {
                                     *update_state.lock().unwrap() = Some((new_ver, url));
                                 }
                                 ctx_clone.request_repaint();
                             });
                         });
                     }
-
-                    ui.checkbox(&mut self.allow_alpha, "接收预览版(Alpha)");
                 });
             });
-
+            
             ui.separator();
 
+            // 更新提示条
             if let Some((new_ver, download_url)) = update_opt {
                 ui.horizontal(|ui| {
                     ui.colored_label(egui::Color32::YELLOW, format!("🎉 发现新版本 v{}", new_ver));
@@ -223,14 +256,14 @@ impl eframe::App for JituanApp {
                 ui.separator();
             }
 
+            // 输入区域
             ui.add_space(10.0);
             egui::Grid::new("input_grid")
                 .num_columns(3)
                 .spacing([10.0, 15.0])
                 .show(ui, |ui| {
                     ui.label("下载地址");
-                    let url_res =
-                        ui.add_sized([360.0, 22.0], egui::TextEdit::singleline(&mut self.url));
+                    let url_res = ui.add_sized([360.0, 22.0], egui::TextEdit::singleline(&mut self.url));
                     ui.end_row();
                     if url_res.changed() {
                         if let Some(filename) = extract_filename_from_url(&self.url) {
@@ -240,10 +273,7 @@ impl eframe::App for JituanApp {
 
                     ui.label("保存到");
                     ui.add_enabled_ui(!self.is_downloading, |ui| {
-                        ui.add_sized(
-                            [320.0, 22.0],
-                            egui::TextEdit::singleline(&mut self.save_dir),
-                        );
+                        ui.add_sized([320.0, 22.0], egui::TextEdit::singleline(&mut self.save_dir));
                         if ui.button("选择").clicked() {
                             let mut dialog = rfd::FileDialog::new();
                             if Path::new(&self.save_dir).exists() {
@@ -258,29 +288,14 @@ impl eframe::App for JituanApp {
 
                     ui.label("文件名");
                     ui.add_enabled_ui(!self.is_downloading, |ui| {
-                        ui.add_sized(
-                            [360.0, 22.0],
-                            egui::TextEdit::singleline(&mut self.file_name),
-                        );
+                        ui.add_sized([360.0, 22.0], egui::TextEdit::singleline(&mut self.file_name));
                     });
                     ui.end_row();
                 });
 
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.use_mirror, "启用镜像智能加速");
-
-                if ui.button("管理镜像规则").clicked() {
-                    if mirror::use_internal_editor() {
-                        self.ui_mirrors = mirror::get_mirrors();
-                        self.is_editing_mirrors = true;
-                    } else {
-                        let _ = mirror::get_mirrors_raw();
-                        let _ = opener::open(mirror::get_config_path());
-                    }
-                }
-            });
-
             ui.add_space(15.0);
+            
+            // 按钮区域
             ui.horizontal(|ui| {
                 let total_width = 240.0;
                 let available_width = ui.available_width();
@@ -290,28 +305,23 @@ impl eframe::App for JituanApp {
                     if ui.add_sized([100.0, 30.0], egui::Button::new("开始下载")).clicked() {
                         self.is_downloading = true;
                         self.status_text = "正在准备下载...".to_string();
-                        *self.progress.lock().unwrap() = 0.0;
-
+                        *self.progress.lock().unwrap() = 0.0; 
+                        
                         let raw_url = self.url.clone();
-
-                        // 【P2P 分流】
+                        
+                        // P2P 分流
                         if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
                             let dir_str = self.save_dir.clone();
                             let progress_clone = self.progress.clone();
                             let ctx_clone = ctx.clone();
-
+                            
                             std::thread::spawn(move || {
                                 let rt = tokio::runtime::Runtime::new().unwrap();
                                 rt.block_on(async move {
-                                    let _ = jituan_core::core::torrent::download_p2p(
-                                        &raw_url,
-                                        &dir_str,
-                                        move |prog, _status| {
-                                            *progress_clone.lock().unwrap() = prog;
-                                            ctx_clone.request_repaint();
-                                        },
-                                    )
-                                    .await;
+                                    let _ = jituan_core::core::torrent::download_p2p(&raw_url, &dir_str, move |prog, _status| {
+                                        *progress_clone.lock().unwrap() = prog;
+                                        ctx_clone.request_repaint();
+                                    }).await;
                                 });
                             });
                             return;
@@ -321,7 +331,7 @@ impl eframe::App for JituanApp {
                         let use_mirror = self.use_mirror;
                         let file_path = Path::new(&self.save_dir).join(&self.file_name);
                         let file_path_str = file_path.to_string_lossy().to_string();
-
+                        
                         let progress_clone = self.progress.clone();
                         let ctx_clone = ctx.clone();
 
@@ -337,18 +347,12 @@ impl eframe::App for JituanApp {
                                 let client = match reqwest::Client::builder()
                                     .timeout(std::time::Duration::from_secs(15))
                                     .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-                                    .build()
-                                {
-                                    Ok(c) => c,
-                                    Err(_) => return,
-                                };
-
-                                let res = match client
-                                    .get(&final_url)
-                                    .header("Range", "bytes=0-0")
-                                    .send()
-                                    .await
-                                {
+                                    .build() {
+                                        Ok(c) => c,
+                                        Err(_) => return,
+                                    };
+                                
+                                let res = match client.get(&final_url).header("Range", "bytes=0-0").send().await {
                                     Ok(r) => r,
                                     Err(e) => {
                                         eprintln!("连接失败: {}", e);
@@ -358,37 +362,28 @@ impl eframe::App for JituanApp {
                                     }
                                 };
 
-                                let (total_size, concurrency) =
-                                    if res.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-                                        let size = res
-                                            .headers()
-                                            .get("content-range")
-                                            .and_then(|v| v.to_str().ok())
-                                            .and_then(|v| v.split('/').nth(1))
-                                            .and_then(|v| v.parse::<u64>().ok())
-                                            .unwrap_or(0);
-                                        (size, 16)
-                                    } else if res.status() == reqwest::StatusCode::OK {
-                                        let size = res
-                                            .headers()
-                                            .get("content-length")
-                                            .and_then(|v| v.to_str().ok())
-                                            .and_then(|v| v.parse::<u64>().ok())
-                                            .unwrap_or(0);
-                                        (size, 1)
-                                    } else {
-                                        (0, 1)
-                                    };
+                                let (total_size, concurrency) = if res.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+                                    let size = res.headers().get("content-range")
+                                        .and_then(|v| v.to_str().ok()).and_then(|v| v.split('/').nth(1))
+                                        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                                    (size, 16)
+                                } else if res.status() == reqwest::StatusCode::OK {
+                                    let size = res.headers().get("content-length")
+                                        .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                                    (size, 1)
+                                } else {
+                                    (0, 1)
+                                };
 
-                                if total_size == 0 {
+                                if total_size == 0 { 
                                     *progress_clone.lock().unwrap() = -1.0;
                                     ctx_clone.request_repaint();
-                                    return;
+                                    return; 
                                 }
 
                                 let scheduler = Arc::new(Scheduler::new(32, 16));
                                 scheduler.register_task();
-
+                                
                                 let path_buf = PathBuf::from(&file_path_str);
                                 if let Ok(file) = std::fs::File::create(&path_buf) {
                                     let _ = file.set_len(total_size);
@@ -397,39 +392,31 @@ impl eframe::App for JituanApp {
                                     ctx_clone.request_repaint();
                                     return;
                                 }
-
-                                let t = Task::new(
-                                    "gui_task".to_string(),
-                                    final_url.clone(),
-                                    path_buf.clone(),
-                                    total_size,
-                                    concurrency,
-                                );
+                                
+                                let t = Task::new("gui_task".to_string(), final_url.clone(), path_buf.clone(), total_size, concurrency);
                                 let task_arc = Arc::new(Mutex::new(t));
-
+                                
                                 let mut handles = vec![];
                                 for i in 0..concurrency {
                                     handles.push(tokio::spawn(engine::download_chunk(
-                                        client.clone(),
-                                        task_arc.clone(),
-                                        i,
-                                        final_url.clone(),
-                                        file_path_str.clone(),
-                                        scheduler.global_limit.clone(),
+                                        client.clone(), 
+                                        task_arc.clone(), 
+                                        i, 
+                                        final_url.clone(), 
+                                        file_path_str.clone(), 
+                                        scheduler.global_limit.clone()
                                     )));
                                 }
-
+                                
                                 loop {
                                     let t = task_arc.lock().await;
                                     let prog = (t.progress() / 100.0) as f32;
                                     drop(t);
-
+                                    
                                     *progress_clone.lock().unwrap() = prog;
-                                    ctx_clone.request_repaint();
-
-                                    if prog >= 1.0 {
-                                        break;
-                                    }
+                                    ctx_clone.request_repaint(); 
+                                    
+                                    if prog >= 1.0 { break; }
                                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 }
                             });
@@ -437,10 +424,7 @@ impl eframe::App for JituanApp {
                     }
                 });
 
-                if ui
-                    .add_sized([100.0, 30.0], egui::Button::new("打开文件夹"))
-                    .clicked()
-                {
+                if ui.add_sized([100.0, 30.0], egui::Button::new("打开文件夹")).clicked() {
                     let _ = opener::open(&self.save_dir);
                 }
             });
@@ -467,26 +451,16 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default().with_inner_size([550.0, 400.0]),
         ..Default::default()
     };
-
+    
     eframe::run_native(
         "汲湍",
         options,
         Box::new(|cc| {
             let mut fonts = egui::FontDefinitions::default();
             if let Ok(font_data) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
-                fonts
-                    .font_data
-                    .insert("msyh".to_owned(), egui::FontData::from_owned(font_data));
-                fonts
-                    .families
-                    .get_mut(&egui::FontFamily::Proportional)
-                    .unwrap()
-                    .insert(0, "msyh".to_owned());
-                fonts
-                    .families
-                    .get_mut(&egui::FontFamily::Monospace)
-                    .unwrap()
-                    .insert(0, "msyh".to_owned());
+                fonts.font_data.insert("msyh".to_owned(), egui::FontData::from_owned(font_data));
+                fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "msyh".to_owned());
+                fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "msyh".to_owned());
             }
             cc.egui_ctx.set_fonts(fonts);
             Ok(Box::new(JituanApp::default()))
