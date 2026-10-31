@@ -91,28 +91,40 @@ try {
     
     $latestCommit = (git rev-parse HEAD).Trim()
 
+    # 【核心逻辑】判断是否为预发布版本
+    $isPrerelease = $version -match "-"
+
     $bodyObject = @{
         tag_name         = $tag
         name             = $releaseTitle
         body             = $releaseBody
         target_commitish = $latestCommit
-        release_status   = "latest"
     }
-    
+
+    if ($isPrerelease) {
+        Write-Host "[信息] 检测到预发布版本标签 ($version)，将标记为 Pre-release。" -ForegroundColor Yellow
+        $bodyObject["prerelease"] = $true
+        # 预发布版本不抢占 latest 标签
+    } else {
+        Write-Host "[信息] 正式版本 ($version)，将标记为 Latest。" -ForegroundColor Green
+        $bodyObject["prerelease"] = $false
+        $bodyObject["release_status"] = "latest"
+    }
+
     $jsonBody = $bodyObject | ConvertTo-Json -Depth 10
     $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($jsonBody)
 
     try {
         $response = Invoke-RestMethod -Uri $releaseApiUrl -Method Post -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Bytes -ErrorAction Stop
-        Write-Host "[成功] Release 创建成功并标记为最新！" -ForegroundColor Green
+        Write-Host "[成功] Release 创建成功！" -ForegroundColor Green
     } catch {
         $statusCode = $_.Exception.Response.StatusCode.value__
         if ($statusCode -eq 409) {
-            Write-Host "[警告] Release 已存在，正在尝试更新已有 Release 标记..." -ForegroundColor Yellow
+            Write-Host "[警告] Release 已存在，尝试更新已有 Release 标记..." -ForegroundColor Yellow
             $updateApiUrl = "${apiBase}/repos/${repoOwner}/${repoName}/releases/${tag}"
             try {
                 $patchResponse = Invoke-RestMethod -Uri $updateApiUrl -Method Patch -Headers $headers -ContentType "application/json; charset=utf-8" -Body $utf8Bytes -ErrorAction Stop
-                Write-Host "[成功] 已有 Release 已更新并标记为最新！" -ForegroundColor Green
+                Write-Host "[成功] 已有 Release 已更新！" -ForegroundColor Green
             } catch {
                 Write-Host "[警告] 无法更新已有 Release 标记，继续执行上传。" -ForegroundColor Yellow
             }

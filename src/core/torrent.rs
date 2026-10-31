@@ -87,7 +87,7 @@ pub async fn download_p2p(
 
     if url.starts_with("magnet:") {
         let magnet = parse_magnet(url)?;
-        progress_callback(0.2, format!("已解析: {} (Trackers: {})", magnet.display_name, magnet.trackers.len()));
+        progress_callback(0.2, format!("已解析: {} (包含 {} 个 Tracker)", magnet.display_name, magnet.trackers.len()));
 
         if magnet.trackers.is_empty() {
             progress_callback(1.0, "❌ 该磁力链接没有 Tracker，暂不支持 DHT 发现".to_string());
@@ -119,13 +119,14 @@ pub async fn download_p2p(
             return Ok(());
         }
 
-        // 【复用现有的 Scheduler】
+        // 复用现有的 Scheduler
         let scheduler = Arc::new(Scheduler::new(32, 10));
         scheduler.register_task();
         let peer_id = generate_peer_id();
         let mut handles = vec![];
 
-        for (i, peer) in all_peers.into_iter().enumerate().take(5) { // 只挑前 5 个测试
+        // 只挑前 5 个 Peer 进行公网握手测试
+        for peer in all_peers.into_iter().take(5) {
             let peer_id = peer_id.clone();
             let info_hash = magnet.info_hash.clone();
             let sem = scheduler.global_limit.clone();
