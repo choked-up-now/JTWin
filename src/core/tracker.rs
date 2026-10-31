@@ -13,9 +13,7 @@ pub struct UdpTracker {
 
 impl UdpTracker {
     pub async fn new(tracker_url: &str) -> Result<Self> {
-        // 简单去除 udp://
         let addr_str = tracker_url.strip_prefix("udp://").unwrap_or(tracker_url);
-        // 截取端口前的部分（去路径）
         let addr_str = addr_str.split('/').next().unwrap_or(addr_str);
 
         let socket = UdpSocket::bind("0.0.0.0:0").await?;

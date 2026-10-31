@@ -24,17 +24,28 @@ try {
     $issContent = $issContent -replace '#define MyAppVersion ".*"', "#define MyAppVersion `"$version`""
     [System.IO.File]::WriteAllText((Resolve-Path $issPath), $issContent, (New-Object System.Text.UTF8Encoding($true)))
 
-    # 3. 编译 Release 版本
+    $releaseDir = "installer\JiTuan_Release"
+    if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
+
+    # 3. 编译 Release 版本（编译两次：完整版 和 精简版）
     Write-Host "`n[1/5] 正在编译 Release 版本..." -ForegroundColor Yellow
+    
+    Write-Host "-> 编译完整版 (Full, 包含 P2P)..." -ForegroundColor Cyan
     cargo build --release --features full
-    if ($LASTEXITCODE -ne 0) { throw "cargo build 失败！" }
+    if ($LASTEXITCODE -ne 0) { throw "编译完整版失败！" }
+    
+    Copy-Item "D:\Rust\target\release\jituan-gui.exe" -Destination "$releaseDir\jituan-gui-full.exe" -Force
+    Copy-Item "D:\Rust\target\release\jituan-cli.exe" -Destination "$releaseDir\jituan-cli-full.exe" -Force
+
+    Write-Host "-> 编译精简版 (Lite, 纯 HTTP)..." -ForegroundColor Cyan
+    cargo build --release --features cli,gui
+    if ($LASTEXITCODE -ne 0) { throw "编译精简版失败！" }
+    
+    Copy-Item "D:\Rust\target\release\jituan-gui.exe" -Destination "$releaseDir\jituan-gui-lite.exe" -Force
+    Copy-Item "D:\Rust\target\release\jituan-cli.exe" -Destination "$releaseDir\jituan-cli-lite.exe" -Force
 
     # 4. 准备打包文件
     Write-Host "`n[2/5] 正在准备打包文件..." -ForegroundColor Yellow
-    $releaseDir = "installer\JiTuan_Release"
-    if (-not (Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir | Out-Null }
-    Copy-Item "D:\Rust\target\release\jituan-gui.exe" -Destination $releaseDir -Force
-    Copy-Item "D:\Rust\target\release\jituan-cli.exe" -Destination $releaseDir -Force
     if (Test-Path "LICENSE") { Copy-Item "LICENSE" -Destination $releaseDir -Force }
     if (Test-Path "NOTICE") { Copy-Item "NOTICE" -Destination $releaseDir -Force }
 
@@ -88,10 +99,8 @@ try {
 
     $dateStr = Get-Date -Format "yyyyMMdd"
     $releaseTitle = "汲湍 $tag $dateStr"
-    
     $latestCommit = (git rev-parse HEAD).Trim()
 
-    # 【核心逻辑】判断是否为预发布版本
     $isPrerelease = $version -match "-"
 
     $bodyObject = @{
@@ -104,7 +113,7 @@ try {
     if ($isPrerelease) {
         Write-Host "[信息] 检测到预发布版本标签 ($version)，将标记为 Pre-release。" -ForegroundColor Yellow
         $bodyObject["prerelease"] = $true
-        # 预发布版本不抢占 latest 标签
+        $bodyObject["release_status"] = "pre"
     } else {
         Write-Host "[信息] 正式版本 ($version)，将标记为 Latest。" -ForegroundColor Green
         $bodyObject["prerelease"] = $false
@@ -128,10 +137,6 @@ try {
             } catch {
                 Write-Host "[警告] 无法更新已有 Release 标记，继续执行上传。" -ForegroundColor Yellow
             }
-        } elseif ($statusCode -eq 400) {
-            $errBody = $_.ErrorDetails.Message
-            Write-Host "❌ [400 详细错误] $errBody" -ForegroundColor Red
-            throw "创建 Release 失败，400 错误详情已打印在上方。"
         } else {
             throw "创建 Release 失败: $($_.Exception.Message)"
         }

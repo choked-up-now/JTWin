@@ -26,10 +26,9 @@ struct JituanApp {
     is_downloading: bool,
     use_mirror: bool,
     
-    // 窗口状态
     is_editing_mirrors: bool,
     ui_mirrors: Vec<mirror::MirrorConfig>,
-    is_settings_open: bool, // 新增：设置窗口状态
+    is_settings_open: bool,
     
     allow_alpha: bool,
     update_available: Arc<StdMutex<Option<(String, String)>>>,
@@ -63,7 +62,6 @@ impl eframe::App for JituanApp {
         let current_progress = *self.progress.lock().unwrap();
         let update_opt = self.update_available.lock().unwrap().clone();
 
-        // 自动检查更新
         if !self.has_checked_update {
             self.has_checked_update = true;
             let ctx_clone = ctx.clone();
@@ -80,7 +78,6 @@ impl eframe::App for JituanApp {
             });
         }
 
-        // ================== 设置窗口 ==================
         if self.is_settings_open {
             let mut open = true;
             egui::Window::new("⚙️ 设置")
@@ -115,7 +112,6 @@ impl eframe::App for JituanApp {
             }
         }
 
-        // ================== 镜像编辑窗口 ==================
         if self.is_editing_mirrors {
             let mut open = true;
             egui::Window::new("智能镜像规则管理")
@@ -201,20 +197,15 @@ impl eframe::App for JituanApp {
             if !open { self.is_editing_mirrors = false; }
         }
 
-        // ================== 主界面 ==================
         egui::CentralPanel::default().show(ctx, |ui| {
-            // 顶部栏
             ui.horizontal(|ui| {
                 ui.heading("🌊 汲湍 (JiTuan)");
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // 设置按钮
                     if ui.button("⚙️ 设置").clicked() {
                         self.is_settings_open = true;
                     }
-                    
                     ui.separator();
-                    
                     ui.label(format!("v{}", updater::CURRENT_VERSION));
                     
                     if ui.add_enabled(!self.is_checking_update, egui::Button::new("手动检查")).clicked() {
@@ -237,7 +228,6 @@ impl eframe::App for JituanApp {
             
             ui.separator();
 
-            // 更新提示条
             if let Some((new_ver, download_url)) = update_opt {
                 ui.horizontal(|ui| {
                     ui.colored_label(egui::Color32::YELLOW, format!("🎉 发现新版本 v{}", new_ver));
@@ -256,7 +246,6 @@ impl eframe::App for JituanApp {
                 ui.separator();
             }
 
-            // 输入区域
             ui.add_space(10.0);
             egui::Grid::new("input_grid")
                 .num_columns(3)
@@ -295,7 +284,6 @@ impl eframe::App for JituanApp {
 
             ui.add_space(15.0);
             
-            // 按钮区域
             ui.horizontal(|ui| {
                 let total_width = 240.0;
                 let available_width = ui.available_width();
@@ -309,25 +297,32 @@ impl eframe::App for JituanApp {
                         
                         let raw_url = self.url.clone();
                         
-                        // P2P 分流
                         if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
-                            let dir_str = self.save_dir.clone();
-                            let progress_clone = self.progress.clone();
-                            let ctx_clone = ctx.clone();
-                            
-                            std::thread::spawn(move || {
-                                let rt = tokio::runtime::Runtime::new().unwrap();
-                                rt.block_on(async move {
-                                    let _ = jituan_core::core::torrent::download_p2p(&raw_url, &dir_str, move |prog, _status| {
-                                        *progress_clone.lock().unwrap() = prog;
-                                        ctx_clone.request_repaint();
-                                    }).await;
+                            #[cfg(feature = "p2p")]
+                            {
+                                let dir_str = self.save_dir.clone();
+                                let progress_clone = self.progress.clone();
+                                let ctx_clone = ctx.clone();
+                                
+                                std::thread::spawn(move || {
+                                    let rt = tokio::runtime::Runtime::new().unwrap();
+                                    rt.block_on(async move {
+                                        let _ = jituan_core::core::torrent::download_p2p(&raw_url, &dir_str, move |prog, _status| {
+                                            *progress_clone.lock().unwrap() = prog;
+                                            ctx_clone.request_repaint();
+                                        }).await;
+                                    });
                                 });
-                            });
-                            return;
+                                return;
+                            }
+                            #[cfg(not(feature = "p2p"))]
+                            {
+                                self.status_text = "❌ 精简版不支持 P2P 链接".to_string();
+                                *self.progress.lock().unwrap() = -1.0;
+                                return;
+                            }
                         }
 
-                        // HTTP 逻辑
                         let use_mirror = self.use_mirror;
                         let file_path = Path::new(&self.save_dir).join(&self.file_name);
                         let file_path_str = file_path.to_string_lossy().to_string();

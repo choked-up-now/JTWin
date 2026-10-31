@@ -3,14 +3,18 @@ use jituan_core::core::{
     engine, mirror,
     models::{Task, TaskStatus},
     scheduler::Scheduler,
-    storage, torrent, updater,
+    storage, updater,
 };
+
+#[cfg(feature = "p2p")]
+use jituan_core::core::torrent;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[derive(Parser, Debug)]
-#[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器 (支持 HTTP 与 P2P)")]
+#[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器")]
 struct Args {
     /// 下载链接 (HTTP URL 或 magnet: 磁力链接)
     url: Option<String>,
@@ -76,23 +80,37 @@ async fn main() -> anyhow::Result<()> {
     };
     let save_dir_str = save_dir.to_string_lossy().to_string();
 
+    // ==========================================
+    // 分流 1：P2P 下载 (磁力链接或 .torrent 文件)
+    // ==========================================
     if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
-        println!("🌊 汲湍 P2P 引擎启动");
-        println!("目标链接: {}", raw_url);
-        println!("保存至: {}", save_dir_str);
+        #[cfg(feature = "p2p")]
+        {
+            println!("🌊 汲湍 P2P 引擎启动");
+            println!("目标链接: {}", raw_url);
+            println!("保存至: {}", save_dir_str);
 
-        let result = torrent::download_p2p(&raw_url, &save_dir_str, |progress, status| {
-            print!("\r[{:.2}%] {}", progress * 100.0, status);
-            use std::io::Write; std::io::stdout().flush().unwrap();
-        }).await;
+            let result = torrent::download_p2p(&raw_url, &save_dir_str, |progress, status| {
+                print!("\r[{:.2}%] {}", progress * 100.0, status);
+                use std::io::Write; std::io::stdout().flush().unwrap();
+            }).await;
 
-        if let Err(e) = result {
-            eprintln!("\n❌ P2P 失败: {}", e);
+            if let Err(e) = result {
+                eprintln!("\n❌ P2P 失败: {}", e);
+            }
+            println!();
+            return Ok(());
         }
-        println!();
-        return Ok(());
+        #[cfg(not(feature = "p2p"))]
+        {
+            eprintln!("❌ 当前为精简版 (Lite)，不支持 P2P 磁力链接下载。请重新安装并勾选 P2P 支持。");
+            return Ok(());
+        }
     }
 
+    // ==========================================
+    // 分流 2：HTTP 下载
+    // ==========================================
     let url = if args.no_mirror {
         raw_url.clone()
     } else {

@@ -1,10 +1,11 @@
 use crate::core::scheduler::Scheduler;
 use crate::core::tracker::UdpTracker;
-use anyhow::{Context, Result};
+use crate::core::mse::mse_handshake_client;
+use anyhow::{Context, Result, bail};
 use percent_encoding::percent_decode_str;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
+use rand::rngs::StdRng;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 #[derive(Debug, Clone)]
@@ -40,7 +41,7 @@ pub fn parse_magnet(uri: &str) -> Result<MagnetInfo> {
     let info_hash = if hex_hash.len() == 40 {
         decode_hex(&hex_hash)?
     } else {
-        anyhow::bail!("不支持的哈希长度");
+        bail!("不支持的哈希长度");
     };
 
     Ok(MagnetInfo { info_hash, display_name, trackers })
@@ -55,7 +56,8 @@ fn decode_hex(s: &str) -> Result<Vec<u8>> {
 }
 
 pub fn generate_peer_id() -> Vec<u8> {
-    let mut rng = rand::thread_rng();
+    // 使用 StdRng 确保跨线程安全
+    let mut rng = StdRng::from_entropy();
     let mut random_bytes = [0u8; 12];
     rng.fill(&mut random_bytes);
     let mut peer_id = b"-JT0001-".to_vec();
@@ -63,9 +65,18 @@ pub fn generate_peer_id() -> Vec<u8> {
     peer_id
 }
 
-pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u8]) -> Result<TcpStream> {
-    let mut stream = tokio::time::timeout(std::time::Duration::from_secs(5), TcpStream::connect(peer_addr)).await??;
+/// 使用 MSE 加密协议与 Peer 进行握手
+pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u8]) -> Result<crate::core::mse::MseStream> {
+    let stream = tokio::time::timeout(std::time::Duration::from_secs(8), TcpStream::connect(peer_addr))
+        .await
+        .context("连接超时")??;
 
+    let ih_array: [u8; 20] = info_hash.try_into().map_err(|_| anyhow::anyhow!("info_hash 长度错误"))?;
+
+    // 1. 发起 MSE 加密握手
+    let mut mse_stream = mse_handshake_client(stream, &ih_array).await?;
+
+    // 2. 在加密流上发送 BitTorrent 握手包
     let mut handshake = Vec::with_capacity(68);
     handshake.push(19u8);
     handshake.extend_from_slice(b"BitTorrent protocol");
@@ -73,9 +84,20 @@ pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u
     handshake.extend_from_slice(info_hash);
     handshake.extend_from_slice(peer_id);
 
-    stream.write_all(&handshake).await?;
-    stream.flush().await?;
-    Ok(stream)
+    mse_stream.write_encrypted(&handshake).await?;
+
+    // 3. 读取对方的 BT 握手包 (从加密流读取)
+    let mut response = [0u8; 68];
+    mse_stream.read_decrypted(&mut response).await?;
+
+    if response[0] != 19 || &response[1..20] != b"BitTorrent protocol" {
+        bail!("BitTorrent 协议不匹配");
+    }
+    if &response[28..48] != info_hash {
+        bail!("info_hash 不匹配");
+    }
+
+    Ok(mse_stream)
 }
 
 pub async fn download_p2p(
@@ -119,14 +141,13 @@ pub async fn download_p2p(
             return Ok(());
         }
 
-        // 复用现有的 Scheduler
         let scheduler = Arc::new(Scheduler::new(32, 10));
         scheduler.register_task();
         let peer_id = generate_peer_id();
         let mut handles = vec![];
 
-        // 只挑前 5 个 Peer 进行公网握手测试
-        for peer in all_peers.into_iter().take(5) {
+        // 挑选前 10 个 Peer 进行加密握手测试
+        for peer in all_peers.into_iter().take(10) {
             let peer_id = peer_id.clone();
             let info_hash = magnet.info_hash.clone();
             let sem = scheduler.global_limit.clone();
@@ -134,7 +155,7 @@ pub async fn download_p2p(
             let h = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
                 match handshake_with_peer(&peer, &info_hash, &peer_id).await {
-                    Ok(_stream) => println!("[P2P] ✅ 成功与公网 Peer {} 完成握手", peer),
+                    Ok(_stream) => println!("[P2P] ✅ 成功与公网 Peer {} 完成 MSE 加密握手", peer),
                     Err(e) => eprintln!("[P2P] ❌ 与 Peer {} 握手失败: {}", peer, e),
                 }
             });
@@ -142,9 +163,9 @@ pub async fn download_p2p(
         }
 
         for h in handles { let _ = h.await; }
-        progress_callback(1.0, "🎉 公网 Peer 握手测试结束！".to_string());
+        progress_callback(1.0, "🎉 公网 Peer 加密握手测试结束！".to_string());
     } else {
-        anyhow::bail!("目前只支持 magnet 测试");
+        bail!("目前只支持 magnet 测试");
     }
     Ok(())
 }

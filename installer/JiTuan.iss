@@ -1,10 +1,7 @@
 ﻿#define MyAppName "汲湍 (JiTuan)"
-#define MyAppVersion "0.6.1-beta.2"
+#define MyAppVersion "0.7.0"
 #define MyAppPublisher "choked-up-now"
 #define MyAppURL "https://atomgit.com/choked-up-now/JiTuan-win"
-
-; 如果需要加载私库美化资源，取消下面这行的注释（确保路径正确）
-; #include "..\..\..\HeXvWizardUI\theme_config.iss"
 
 [Setup]
 AppId={{D3C9F88A-7F1B-4C1A-9B2A-8A2C5F6D7E8B}
@@ -20,7 +17,6 @@ OutputDir=Output
 OutputBaseFilename=JiTuan_v{#MyAppVersion}_Setup
 Compression=lzma
 SolidCompression=yes
-; 【此处改为冰原风格】
 WizardStyle=polar
 PrivilegesRequired=admin
 CloseApplications=yes
@@ -33,15 +29,21 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加图标:"
 Name: "internal_editor"; Description: "使用汲湍内置的 JSON 编辑器 (推荐)"; GroupDescription: "镜像规则编辑器偏好:"; Flags: checkedonce
 
-[Files]
-Source: "JiTuan_Release\jituan-gui.exe"; DestDir: "{app}"; Components: gui
-Source: "JiTuan_Release\jituan-cli.exe"; DestDir: "{app}"; Components: cli
-Source: "JiTuan_Release\LICENSE"; DestDir: "{app}"; Components: gui or cli
-Source: "JiTuan_Release\NOTICE"; DestDir: "{app}"; Components: gui or cli
-
 [Components]
 Name: "gui"; Description: "汲湍 图形界面版 (GUI)"; Types: full compact custom
 Name: "cli"; Description: "汲湍 命令行版 (CLI, 将自动加入系统 PATH)"; Types: full custom
+Name: "p2p"; Description: "安装 P2P 种子/磁力链下载支持 (增加约 1.5MB)"; Types: full; Flags: checkablealone
+
+[Files]
+; 【核心逻辑】根据是否勾选 P2P 组件，选择安装完整版还是精简版，并在安装时统一重命名为正式名称
+Source: "JiTuan_Release\jituan-gui-full.exe"; DestDir: "{app}"; DestName: "jituan-gui.exe"; Components: gui and p2p
+Source: "JiTuan_Release\jituan-gui-lite.exe"; DestDir: "{app}"; DestName: "jituan-gui.exe"; Components: gui and not p2p
+
+Source: "JiTuan_Release\jituan-cli-full.exe"; DestDir: "{app}"; DestName: "jituan-cli.exe"; Components: cli and p2p
+Source: "JiTuan_Release\jituan-cli-lite.exe"; DestDir: "{app}"; DestName: "jituan-cli.exe"; Components: cli and not p2p
+
+Source: "JiTuan_Release\LICENSE"; DestDir: "{app}"; Components: gui or cli
+Source: "JiTuan_Release\NOTICE"; DestDir: "{app}"; Components: gui or cli
 
 [Icons]
 Name: "{group}\汲湍"; Filename: "{app}\jituan-gui.exe"; Components: gui
@@ -59,7 +61,7 @@ begin
   begin
     if (not WizardIsComponentSelected('gui')) and (not WizardIsComponentSelected('cli')) then
     begin
-      MsgBox('必须至少安装一个组件（图形界面版或命令行版）！', mbError, MB_OK);
+      MsgBox('必须至少安装一个界面组件（GUI 或 CLI）！', mbError, MB_OK);
       Result := False;
     end;
   end;
