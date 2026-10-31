@@ -1,22 +1,24 @@
+use crate::core::scheduler::Scheduler;
+use crate::core::tracker::UdpTracker;
 use anyhow::{Context, Result};
 use percent_encoding::percent_decode_str;
 use rand::Rng;
-use std::path::Path;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::Arc;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
 #[derive(Debug, Clone)]
 pub struct MagnetInfo {
     pub info_hash: Vec<u8>,
     pub display_name: String,
-    pub file_size: u64,
+    pub trackers: Vec<String>,
 }
 
 pub fn parse_magnet(uri: &str) -> Result<MagnetInfo> {
     let stripped = uri.strip_prefix("magnet:?").context("无效的磁力链接")?;
     let mut info_hash_hex = None;
     let mut display_name = "Unknown".to_string();
-    let mut file_size = 0;
+    let mut trackers = Vec::new();
 
     for pair in stripped.split('&') {
         let mut kv = pair.splitn(2, '=');
@@ -29,7 +31,7 @@ pub fn parse_magnet(uri: &str) -> Result<MagnetInfo> {
                 }
             }
             "dn" => display_name = percent_decode_str(val).decode_utf8_lossy().to_string(),
-            "xl" => file_size = val.parse::<u64>().unwrap_or(0),
+            "tr" => trackers.push(percent_decode_str(val).decode_utf8_lossy().to_string()),
             _ => {}
         }
     }
@@ -41,7 +43,7 @@ pub fn parse_magnet(uri: &str) -> Result<MagnetInfo> {
         anyhow::bail!("不支持的哈希长度");
     };
 
-    Ok(MagnetInfo { info_hash, display_name, file_size })
+    Ok(MagnetInfo { info_hash, display_name, trackers })
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>> {
@@ -61,12 +63,8 @@ pub fn generate_peer_id() -> Vec<u8> {
     peer_id
 }
 
-pub async fn handshake_with_peer(
-    peer_addr: &str,
-    info_hash: &[u8],
-    peer_id: &[u8],
-) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect(peer_addr).await?;
+pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u8]) -> Result<TcpStream> {
+    let mut stream = tokio::time::timeout(std::time::Duration::from_secs(5), TcpStream::connect(peer_addr)).await??;
 
     let mut handshake = Vec::with_capacity(68);
     handshake.push(19u8);
@@ -77,119 +75,73 @@ pub async fn handshake_with_peer(
 
     stream.write_all(&handshake).await?;
     stream.flush().await?;
-
-    let mut response = [0u8; 68];
-    stream.read_exact(&mut response).await?;
-
-    if response[0] != 19 || &response[1..20] != b"BitTorrent protocol" {
-        anyhow::bail!("协议不匹配");
-    }
-    if &response[28..48] != info_hash {
-        anyhow::bail!("info_hash 不匹配");
-    }
-
     Ok(stream)
-}
-
-async fn send_interested(stream: &mut TcpStream) -> Result<()> {
-    stream.write_all(&[0, 0, 0, 1, 2]).await?;
-    stream.flush().await?;
-    Ok(())
-}
-
-async fn send_request(stream: &mut TcpStream, index: u32, begin: u32, length: u32) -> Result<()> {
-    let mut msg = Vec::with_capacity(17);
-    msg.extend_from_slice(&13u32.to_be_bytes());
-    msg.push(6);
-    msg.extend_from_slice(&index.to_be_bytes());
-    msg.extend_from_slice(&begin.to_be_bytes());
-    msg.extend_from_slice(&length.to_be_bytes());
-    stream.write_all(&msg).await?;
-    stream.flush().await?;
-    Ok(())
 }
 
 pub async fn download_p2p(
     url: &str,
-    save_dir: &str,
+    _save_dir: &str,
     progress_callback: impl Fn(f32, String) + Send + Sync + 'static,
 ) -> Result<()> {
     progress_callback(0.1, "正在解析磁力链接...".to_string());
 
     if url.starts_with("magnet:") {
         let magnet = parse_magnet(url)?;
-        progress_callback(0.2, format!("已解析: {} ({} bytes)", magnet.display_name, magnet.file_size));
+        progress_callback(0.2, format!("已解析: {} (Trackers: {})", magnet.display_name, magnet.trackers.len()));
 
-        // 【本地直连测试】写死 qBittorrent 端口 18082
-        let target_peer = "127.0.0.1:18082"; 
-        progress_callback(0.3, format!("正在连接本地做种节点 {} ...", target_peer));
+        if magnet.trackers.is_empty() {
+            progress_callback(1.0, "❌ 该磁力链接没有 Tracker，暂不支持 DHT 发现".to_string());
+            return Ok(());
+        }
 
-        let peer_id = generate_peer_id();
-        let mut stream = match handshake_with_peer(target_peer, &magnet.info_hash, &peer_id).await {
-            Ok(s) => s,
-            Err(e) => {
-                progress_callback(1.0, format!("❌ 握手失败: {}", e));
-                return Ok(());
-            }
-        };
-        
-        progress_callback(0.4, "✅ 握手成功，发送 Interested 消息...".to_string());
-        send_interested(&mut stream).await?;
-
-        progress_callback(0.5, "等待对方 Unchoke...".to_string());
-
-        loop {
-            let mut len_buf = [0u8; 4];
-            if stream.read_exact(&mut len_buf).await.is_err() {
-                anyhow::bail!("连接被断开");
-            }
-            let msg_len = u32::from_be_bytes(len_buf);
-
-            if msg_len == 0 { continue; }
-
-            let mut msg_id = [0u8; 1];
-            stream.read_exact(&mut msg_id).await?;
-
-            match msg_id[0] {
-                1 => { 
-                    progress_callback(0.6, "✅ 收到 Unchoke，正在请求数据块...".to_string());
-                    let length = if magnet.file_size > 0 { magnet.file_size as u32 } else { 16384 };
-                    send_request(&mut stream, 0, 0, length).await?;
-                }
-                7 => { 
-                    let mut payload = vec![0u8; (msg_len - 1) as usize];
-                    stream.read_exact(&mut payload).await?;
-                    
-                    let index = u32::from_be_bytes(payload[0..4].try_into()?);
-                    let begin = u32::from_be_bytes(payload[4..8].try_into()?);
-                    let data = &payload[8..];
-
-                    progress_callback(0.8, format!("收到 Piece 数据: Index={}, Begin={}, 长度={}", index, begin, data.len()));
-
-                    let file_path = Path::new(save_dir).join(&magnet.display_name);
-                    if !save_dir.is_empty() {
-                        std::fs::create_dir_all(save_dir)?;
+        let mut all_peers = Vec::new();
+        for tracker_url in &magnet.trackers {
+            if !tracker_url.starts_with("udp://") { continue; }
+            progress_callback(0.3, format!("正在连接 Tracker: {}", tracker_url));
+            
+            match UdpTracker::new(tracker_url).await {
+                Ok(tracker) => {
+                    let peer_id = generate_peer_id();
+                    match tracker.announce(&magnet.info_hash, &peer_id, 6881).await {
+                        Ok(peers) => {
+                            progress_callback(0.4, format!("Tracker 返回 {} 个 Peer", peers.len()));
+                            all_peers.extend(peers);
+                        }
+                        Err(e) => progress_callback(0.4, format!("Announce 失败: {}", e)),
                     }
-                    
-                    use std::fs::OpenOptions;
-                    use std::io::{Seek, SeekFrom, Write};
-                    let mut file = OpenOptions::new()
-                        .create(true)
-                        .write(true)
-                        .open(&file_path)?;
-                    
-                    file.seek(SeekFrom::Start(begin as u64))?;
-                    file.write_all(data)?;
-
-                    progress_callback(1.0, format!("🎉 成功下载并写入: {:?}", file_path));
-                    break;
                 }
-                _ => {
-                    let mut skip_buf = vec![0u8; (msg_len - 1) as usize];
-                    stream.read_exact(&mut skip_buf).await?;
-                }
+                Err(e) => progress_callback(0.3, format!("Tracker 初始化失败: {}", e)),
             }
         }
+
+        if all_peers.is_empty() {
+            progress_callback(1.0, "❌ 未获取到任何 Peer".to_string());
+            return Ok(());
+        }
+
+        // 【复用现有的 Scheduler】
+        let scheduler = Arc::new(Scheduler::new(32, 10));
+        scheduler.register_task();
+        let peer_id = generate_peer_id();
+        let mut handles = vec![];
+
+        for (i, peer) in all_peers.into_iter().enumerate().take(5) { // 只挑前 5 个测试
+            let peer_id = peer_id.clone();
+            let info_hash = magnet.info_hash.clone();
+            let sem = scheduler.global_limit.clone();
+            
+            let h = tokio::spawn(async move {
+                let _permit = sem.acquire().await.unwrap();
+                match handshake_with_peer(&peer, &info_hash, &peer_id).await {
+                    Ok(_stream) => println!("[P2P] ✅ 成功与公网 Peer {} 完成握手", peer),
+                    Err(e) => eprintln!("[P2P] ❌ 与 Peer {} 握手失败: {}", peer, e),
+                }
+            });
+            handles.push(h);
+        }
+
+        for h in handles { let _ = h.await; }
+        progress_callback(1.0, "🎉 公网 Peer 握手测试结束！".to_string());
     } else {
         anyhow::bail!("目前只支持 magnet 测试");
     }

@@ -6,4 +6,5 @@ pub mod core {
     pub mod updater;
     pub mod mirror;
     pub mod torrent;
+    pub mod tracker; // 新增
 }
