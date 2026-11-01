@@ -56,7 +56,6 @@ fn decode_hex(s: &str) -> Result<Vec<u8>> {
 }
 
 pub fn generate_peer_id() -> Vec<u8> {
-    // 使用 StdRng 确保跨线程安全
     let mut rng = StdRng::from_entropy();
     let mut random_bytes = [0u8; 12];
     rng.fill(&mut random_bytes);
@@ -65,7 +64,6 @@ pub fn generate_peer_id() -> Vec<u8> {
     peer_id
 }
 
-/// 使用 MSE 加密协议与 Peer 进行握手
 pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u8]) -> Result<crate::core::mse::MseStream> {
     let stream = tokio::time::timeout(std::time::Duration::from_secs(8), TcpStream::connect(peer_addr))
         .await
@@ -73,10 +71,8 @@ pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u
 
     let ih_array: [u8; 20] = info_hash.try_into().map_err(|_| anyhow::anyhow!("info_hash 长度错误"))?;
 
-    // 1. 发起 MSE 加密握手
     let mut mse_stream = mse_handshake_client(stream, &ih_array).await?;
 
-    // 2. 在加密流上发送 BitTorrent 握手包
     let mut handshake = Vec::with_capacity(68);
     handshake.push(19u8);
     handshake.extend_from_slice(b"BitTorrent protocol");
@@ -86,7 +82,6 @@ pub async fn handshake_with_peer(peer_addr: &str, info_hash: &[u8], peer_id: &[u
 
     mse_stream.write_encrypted(&handshake).await?;
 
-    // 3. 读取对方的 BT 握手包 (从加密流读取)
     let mut response = [0u8; 68];
     mse_stream.read_decrypted(&mut response).await?;
 
@@ -146,7 +141,6 @@ pub async fn download_p2p(
         let peer_id = generate_peer_id();
         let mut handles = vec![];
 
-        // 挑选前 10 个 Peer 进行加密握手测试
         for peer in all_peers.into_iter().take(10) {
             let peer_id = peer_id.clone();
             let info_hash = magnet.info_hash.clone();

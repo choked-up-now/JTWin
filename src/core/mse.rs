@@ -66,7 +66,6 @@ pub async fn mse_handshake_client(mut stream: TcpStream, info_hash: &[u8; 20]) -
     let p = BigUint::parse_bytes(DH_P_HEX.as_bytes(), 16).context("无效的 DH 素数")?;
     let g = BigUint::from(DH_G);
 
-    // 【核心修复】使用 StdRng 替代 thread_rng，因为 StdRng 是 Send 的，可以安全跨越 await
     let mut rng = StdRng::from_entropy();
     
     let mut xa_bytes = [0u8; 20];
@@ -90,7 +89,14 @@ pub async fn mse_handshake_client(mut stream: TcpStream, info_hash: &[u8; 20]) -
     let yb = BigUint::from_bytes_be(&yb_bytes);
 
     let s = yb.modpow(&xa, &p);
-    let s_bytes = s.to_bytes_be();
+    let mut s_bytes = s.to_bytes_be();
+    while s_bytes.len() < 96 {
+        s_bytes.insert(0, 0);
+    }
+
+    let mut req1 = b"req1".to_vec();
+    req1.extend_from_slice(&s_bytes);
+    let sync_hash = sha1_hash(&req1);
 
     let mut req2 = b"req2".to_vec();
     req2.extend_from_slice(info_hash);
@@ -111,6 +117,7 @@ pub async fn mse_handshake_client(mut stream: TcpStream, info_hash: &[u8; 20]) -
     let ia = Vec::new();
 
     let mut payload = Vec::new();
+    payload.extend_from_slice(&sync_hash);
     payload.extend_from_slice(&obfuscated_skey);
     payload.extend_from_slice(&VC);
     payload.extend_from_slice(&crypto_provide);
@@ -118,9 +125,6 @@ pub async fn mse_handshake_client(mut stream: TcpStream, info_hash: &[u8; 20]) -
     payload.extend_from_slice(&pad_c);
     payload.extend_from_slice(&(ia.len() as u16).to_be_bytes());
     payload.extend_from_slice(&ia);
-
-    stream.write_all(&payload).await?;
-    stream.flush().await?;
 
     let mut key_a = b"keyA".to_vec();
     key_a.extend_from_slice(&s_bytes);
@@ -140,9 +144,15 @@ pub async fn mse_handshake_client(mut stream: TcpStream, info_hash: &[u8; 20]) -
     let mut discard2 = [0u8; 1024];
     decrypt_cipher.apply_keystream(&mut discard2);
 
+    // 【核心修复】发送之前必须用 RC4 加密
+    encrypt_cipher.apply_keystream(&mut payload);
+    stream.write_all(&payload).await?;
+    stream.flush().await?;
+
     let mut response = [0u8; 8 + 4 + 2];
     stream.read_exact(&mut response).await?;
 
+    // 【核心修复】接收后必须用 RC4 解密
     let mut decrypted = response;
     decrypt_cipher.apply_keystream(&mut decrypted);
 

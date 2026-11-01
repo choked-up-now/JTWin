@@ -78,7 +78,12 @@ async fn main() -> anyhow::Result<()> {
             dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap())
         }
     };
+    
+    #[cfg(feature = "p2p")]
     let save_dir_str = save_dir.to_string_lossy().to_string();
+    
+    #[cfg(not(feature = "p2p"))]
+    let _save_dir_str = save_dir.to_string_lossy().to_string();
 
     // ==========================================
     // 分流 1：P2P 下载 (磁力链接或 .torrent 文件)

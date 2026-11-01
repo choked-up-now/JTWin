@@ -7,6 +7,17 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
 fn extract_filename_from_url(url: &str) -> Option<String> {
+    // 1. 如果是磁力链接，提取 dn 参数
+    if url.starts_with("magnet:?") {
+        if let Some(dn_part) = url.split('&').find(|s| s.starts_with("dn=")) {
+            let name = &dn_part[3..];
+            // URL 解码可能包含的百分号编码
+            return Some(percent_encoding::percent_decode_str(name).decode_utf8_lossy().to_string());
+        }
+        return None; // 如果磁力链没有 dn，就不改文件名
+    }
+
+    // 2. 如果是普通 HTTP 链接
     let path = url.split('?').next()?;
     let parts: Vec<&str> = path.split('/').collect();
     let last = parts.last()?;

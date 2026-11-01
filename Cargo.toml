@@ -1,6 +1,6 @@
 [package]
 name = "jituan"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 
 [lib]
@@ -30,11 +30,11 @@ dirs = "5.0"
 rfd = "0.14"
 opener = "0.7"
 regex = "1.11"
+percent-encoding = "2.3" # 改为常规依赖，GUI 解析磁力链需要
 
 # 可选依赖 (P2P 相关)
 bendy = { version = "0.5", features = ["serde"], optional = true }
 sha1 = { version = "0.10", optional = true }
-percent-encoding = { version = "2.3", optional = true }
 serde_bytes = { version = "0.11", optional = true }
 rand = { version = "0.8", optional = true }
 url = { version = "2.5", optional = true }
@@ -51,7 +51,7 @@ default = []
 cli = ["dep:clap"]
 gui = ["dep:eframe"]
 p2p = [
-    "dep:bendy", "dep:sha1", "dep:percent-encoding", "dep:serde_bytes",
+    "dep:bendy", "dep:sha1", "dep:serde_bytes",
     "dep:rand", "dep:url", "dep:num-bigint", "dep:num-traits", "dep:rc4"
 ]
 full = ["cli", "gui", "p2p"]
