@@ -1,6 +1,6 @@
 # 汲湍 (JiTuan)
 
-[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg)](https://atomgit.com/choked-up-now/JiTuan-win/releases)
+[![Version](https://img.shields.io/badge/version-0.7.2-blue.svg)](https://atomgit.com/choked-up-now/JTWin/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)]()
 [![Language](https://img.shields.io/badge/language-Rust-orange.svg)](https://www.rust-lang.org/)
@@ -20,7 +20,7 @@
 
 ## 安装指南
 
-请前往 [Releases](https://atomgit.com/choked-up-now/JiTuan-win/releases) 页面下载最新的安装包（`JiTuan_vX.Y.Z_Setup.exe`）。
+请前往 [Releases](https://atomgit.com/choked-up-now/JTWin/releases) 页面下载最新的安装包（`JiTuan_vX.Y.Z_Setup.exe`）。
 
 安装向导中提供以下可选组件：
 - **图形界面版 (GUI)**：提供直观的下载控制台。
@@ -45,3 +45,36 @@ jituan-cli "magnet:?xt=urn:btih:..."
 
 # 检查并接收预览版更新
 jituan-cli --update --alpha
+```
+
+## 从源码构建
+
+本项目使用标准的 Rust 工具链，确保已安装 Rust 环境。
+
+```bash
+# 编译完整版（包含 GUI、CLI 与 P2P 功能）
+cargo build --release --features full
+
+# 编译纯 HTTP 精简版
+cargo build --release --features cli,gui
+```
+编译产物将生成在 `target/release/` 目录下。
+
+### Cargo Features 说明
+- `cli`：启用命令行界面（依赖 `clap`）。
+- `gui`：启用图形界面（依赖 `eframe`）。
+- `p2p`：启用 P2P 底层协议支持（依赖 `bendy`, `rc4`, `num-bigint` 等）。
+- `full`：包含以上所有功能。
+
+## 技术架构
+
+- **网络层**：`reqwest` + `tokio`（支持 HTTP/2 与原生异步 IO）。
+- **调度层**：自研 `Semaphore` 令牌桶，动态计算并发配额。
+- **P2P 层**：纯手写 BitTorrent 协议栈，支持 Diffie-Hellman 密钥交换与 RC4 流加密。
+- **界面层**：`eframe` (egui) 原生渲染。
+- **自动化**：配套 PowerShell CI/CD 流水线，一键完成编译、打包、Git 推送与 Release 发布。
+
+## 开源协议
+
+本项目采用 [Apache License 2.0](LICENSE) 开源协议。
+```

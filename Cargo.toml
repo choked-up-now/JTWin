@@ -1,6 +1,6 @@
 [package]
 name = "jituan"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 
 [lib]
@@ -30,7 +30,7 @@ dirs = "5.0"
 rfd = "0.14"
 opener = "0.7"
 regex = "1.11"
-percent-encoding = "2.3" # 改为常规依赖，GUI 解析磁力链需要
+percent-encoding = "2.3"
 
 # 可选依赖 (P2P 相关)
 bendy = { version = "0.5", features = ["serde"], optional = true }

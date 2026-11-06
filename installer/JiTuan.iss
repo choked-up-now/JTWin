@@ -1,7 +1,7 @@
 ﻿#define MyAppName "汲湍 (JiTuan)"
-#define MyAppVersion "0.7.1"
+#define MyAppVersion "0.7.2"
 #define MyAppPublisher "choked-up-now"
-#define MyAppURL "https://atomgit.com/choked-up-now/JiTuan-win"
+#define MyAppURL "https://atomgit.com/choked-up-now/JTWin"
 
 [Setup]
 AppId={{D3C9F88A-7F1B-4C1A-9B2A-8A2C5F6D7E8B}
@@ -35,7 +35,6 @@ Name: "cli"; Description: "汲湍 命令行版 (CLI, 将自动加入系统 PATH)
 Name: "p2p"; Description: "安装 P2P 种子/磁力链下载支持 (增加约 1.5MB)"; Types: full; Flags: checkablealone
 
 [Files]
-; 【核心逻辑】根据是否勾选 P2P 组件，选择安装完整版还是精简版，并在安装时统一重命名为正式名称
 Source: "JiTuan_Release\jituan-gui-full.exe"; DestDir: "{app}"; DestName: "jituan-gui.exe"; Components: gui and p2p
 Source: "JiTuan_Release\jituan-gui-lite.exe"; DestDir: "{app}"; DestName: "jituan-gui.exe"; Components: gui and not p2p
 
