@@ -11,10 +11,9 @@ fn extract_filename_from_url(url: &str) -> Option<String> {
     if url.starts_with("magnet:?") {
         if let Some(dn_part) = url.split('&').find(|s| s.starts_with("dn=")) {
             let name = &dn_part[3..];
-            // URL 解码可能包含的百分号编码
             return Some(percent_encoding::percent_decode_str(name).decode_utf8_lossy().to_string());
         }
-        return None; // 如果磁力链没有 dn，就不改文件名
+        return None;
     }
 
     // 2. 如果是普通 HTTP 链接
@@ -308,6 +307,13 @@ impl eframe::App for JituanApp {
                         
                         let raw_url = self.url.clone();
                         
+                        // 【核心新增】拦截网盘分享链接
+                        if let Err(e) = jituan_core::core::engine::validate_download_url(&raw_url) {
+                            self.status_text = format!("❌ {}", e);
+                            *self.progress.lock().unwrap() = -1.0;
+                            return;
+                        }
+
                         if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
                             #[cfg(feature = "p2p")]
                             {
@@ -368,17 +374,15 @@ impl eframe::App for JituanApp {
                                     }
                                 };
 
-                                let (total_size, concurrency) = if res.status() == reqwest::StatusCode::PARTIAL_CONTENT {
-                                    let size = res.headers().get("content-range")
+                                let total_size = if res.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+                                    res.headers().get("content-range")
                                         .and_then(|v| v.to_str().ok()).and_then(|v| v.split('/').nth(1))
-                                        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-                                    (size, 16)
+                                        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0)
                                 } else if res.status() == reqwest::StatusCode::OK {
-                                    let size = res.headers().get("content-length")
-                                        .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
-                                    (size, 1)
+                                    res.headers().get("content-length")
+                                        .and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0)
                                 } else {
-                                    (0, 1)
+                                    0
                                 };
 
                                 if total_size == 0 { 
@@ -387,9 +391,6 @@ impl eframe::App for JituanApp {
                                     return; 
                                 }
 
-                                let scheduler = Arc::new(Scheduler::new(32, 16));
-                                scheduler.register_task();
-                                
                                 let path_buf = PathBuf::from(&file_path_str);
                                 if let Ok(file) = std::fs::File::create(&path_buf) {
                                     let _ = file.set_len(total_size);
@@ -399,32 +400,32 @@ impl eframe::App for JituanApp {
                                     return;
                                 }
                                 
-                                let t = Task::new("gui_task".to_string(), final_url.clone(), path_buf.clone(), total_size, concurrency);
+                                // 【核心改造】使用新的 Task 模型
+                                let t = Task::new("gui_task".to_string(), final_url.clone(), path_buf.clone(), total_size);
                                 let task_arc = Arc::new(Mutex::new(t));
-                                
-                                let mut handles = vec![];
-                                for i in 0..concurrency {
-                                    handles.push(tokio::spawn(engine::download_chunk(
-                                        client.clone(), 
-                                        task_arc.clone(), 
-                                        i, 
-                                        final_url.clone(), 
-                                        file_path_str.clone(), 
-                                        scheduler.global_limit.clone()
-                                    )));
-                                }
-                                
-                                loop {
-                                    let t = task_arc.lock().await;
-                                    let prog = (t.progress() / 100.0) as f32;
-                                    drop(t);
-                                    
-                                    *progress_clone.lock().unwrap() = prog;
-                                    ctx_clone.request_repaint(); 
-                                    
-                                    if prog >= 1.0 { break; }
-                                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                                }
+
+                                // 启动 UI 监控协程
+                                let monitor_task = task_arc.clone();
+                                let p_clone = progress_clone.clone();
+                                let c_clone = ctx_clone.clone();
+                                tokio::spawn(async move {
+                                    loop {
+                                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                        let t = monitor_task.lock().await;
+                                        let prog = (t.downloaded_bytes as f64 / t.total_size as f64) as f32;
+                                        let is_done = t.downloaded_bytes >= t.total_size;
+                                        drop(t);
+                                        
+                                        *p_clone.lock().unwrap() = prog;
+                                        c_clone.request_repaint();
+                                        
+                                        if is_done { break; }
+                                    }
+                                });
+
+                                // 调用 v0.8.0 动态调度引擎
+                                // initial_workers = 4, max_workers = 32
+                                let _ = engine::download_task(task_arc, client, 4, 32).await;
                             });
                         });
                     }

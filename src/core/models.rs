@@ -6,28 +6,12 @@ pub struct Chunk {
     pub index: usize,
     pub start: u64,
     pub end: u64,
-    pub downloaded: u64,
     pub is_finished: bool,
 }
 
 impl Chunk {
     pub fn new(index: usize, start: u64, end: u64) -> Self {
-        Self {
-            index,
-            start,
-            end,
-            downloaded: 0,
-            is_finished: false,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn remaining(&self) -> u64 {
-        if self.is_finished {
-            0
-        } else {
-            (self.end - self.start + 1) - self.downloaded
-        }
+        Self { index, start, end, is_finished: false }
     }
 }
 
@@ -48,21 +32,22 @@ pub struct Task {
     pub total_size: u64,
     pub chunks: Vec<Chunk>,
     pub status: TaskStatus,
+    pub downloaded_bytes: u64, // 记录任务总下载量，用于动态测速
 }
 
 impl Task {
-    pub fn new(id: String, url: String, file_path: PathBuf, total_size: u64, concurrency: usize) -> Self {
+    pub fn new(id: String, url: String, file_path: PathBuf, total_size: u64) -> Self {
         let mut chunks = Vec::new();
-        let chunk_size = total_size / concurrency as u64;
+        // 采用 4MB 的微块切分，替代原来的按线程数均分
+        let micro_chunk_size = 4 * 1024 * 1024; 
+        let mut current_start = 0;
+        let mut index = 0;
 
-        for i in 0..concurrency {
-            let start = i as u64 * chunk_size;
-            let end = if i == concurrency - 1 {
-                total_size - 1
-            } else {
-                start + chunk_size - 1
-            };
-            chunks.push(Chunk::new(i, start, end));
+        while current_start < total_size {
+            let end = (current_start + micro_chunk_size - 1).min(total_size - 1);
+            chunks.push(Chunk::new(index, current_start, end));
+            current_start = end + 1;
+            index += 1;
         }
 
         Self {
@@ -72,18 +57,15 @@ impl Task {
             total_size,
             chunks,
             status: TaskStatus::Pending,
+            downloaded_bytes: 0,
         }
-    }
-
-    pub fn downloaded_bytes(&self) -> u64 {
-        self.chunks.iter().map(|c| c.downloaded).sum()
     }
 
     pub fn progress(&self) -> f64 {
         if self.total_size == 0 {
             0.0
         } else {
-            (self.downloaded_bytes() as f64 / self.total_size as f64) * 100.0
+            (self.downloaded_bytes as f64 / self.total_size as f64) * 100.0
         }
     }
 }
