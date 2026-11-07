@@ -1,7 +1,4 @@
-﻿# ==============================================================================
-# 汲湍 (JiTuan) 自动构建与发布流水线 (PowerShell 7 极简版)
-# ==============================================================================
-
+﻿# 强制设置控制台编码为 UTF-8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -19,7 +16,7 @@ try {
     $tag = "v${version}"
     Write-Host "[信息] 当前版本: $tag"
 
-    # 2. 同步版本号到 .iss (Inno Setup 必须带 BOM，所以这里用 .NET 强制写入)
+    # 2. 同步版本号到 .iss
     Write-Host "[信息] 正在同步版本号到安装脚本..."
     $issPath = "installer\JiTuan.iss"
     if (-not (Test-Path $issPath)) { throw "找不到 $issPath 文件！" }
@@ -75,12 +72,12 @@ try {
 
     $pushUrl = "https://oauth2:${token}@atomgit.com/choked-up-now/JTWin.git"
     git push $pushUrl main -f
+    if ($LASTEXITCODE -ne 0) { throw "推送 main 分支失败！请检查网络。" }
+    
     git push $pushUrl $tag -f
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[警告] Git 推送失败。" -ForegroundColor Yellow
-    } else {
-        Write-Host "[成功] 代码和 Tag 已成功推送到新仓库。" -ForegroundColor Green
-    }
+    if ($LASTEXITCODE -ne 0) { throw "推送 Tag 失败！请检查网络。" }
+    
+    Write-Host "[成功] 代码和 Tag 已成功推送到新仓库。" -ForegroundColor Green
 
     # 7. 创建 Release 并上传附件
     Write-Host "`n[5/5] 正在创建 AtomGit Release 并上传附件..." -ForegroundColor Yellow
@@ -107,7 +104,6 @@ try {
         prerelease       = $isPrerelease
     }
     
-    # 如果不是预发布，才打上 latest 标签
     if (-not $isPrerelease) {
         $bodyObject["release_status"] = "latest"
         Write-Host "[信息] 正式版本，将标记为 Latest。" -ForegroundColor Green
@@ -115,7 +111,6 @@ try {
         Write-Host "[信息] 预发布版本，将标记为 Pre-release。" -ForegroundColor Yellow
     }
 
-    # PS7 的 Invoke-RestMethod 直接传 JSON 字符串即可，默认 UTF-8
     $jsonBody = $bodyObject | ConvertTo-Json -Depth 10
 
     try {
@@ -145,7 +140,6 @@ try {
         $uploadMeta = Invoke-RestMethod -Uri $uploadUrlApi -Method Get -Headers $headers -ErrorAction Stop
         Write-Host "[信息] 正在上传安装包（PUT 请求）..." -ForegroundColor Cyan
         
-        # PS7 下也可以直接使用 Invoke-RestMethod 传文件流，但为了保留签名头的准确性，继续用 .NET 方法
         Add-Type -AssemblyName System.Net.Http
         $client = New-Object System.Net.Http.HttpClient
         

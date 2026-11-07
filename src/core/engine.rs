@@ -1,5 +1,5 @@
 use crate::core::models::{Chunk, Task, TaskStatus};
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Result};
 use futures_util::StreamExt;
 use reqwest::header::RANGE;
 use std::fs::OpenOptions;
@@ -35,7 +35,7 @@ pub async fn download_task(
     initial_workers: usize,
     max_workers: usize,
 ) -> Result<()> {
-    let (url, file_path, total_size, chunk_queue) = {
+    let (_url, file_path, total_size, chunk_queue) = {
         let mut t = task.lock().await;
         t.status = TaskStatus::Downloading;
         let mut queue = Vec::new();
@@ -53,7 +53,7 @@ pub async fn download_task(
     }
 
     // 任务分发通道（队列）
-    let (tx, mut rx) = mpsc::channel::<Chunk>(chunk_queue.len() + 100);
+    let (tx, rx) = mpsc::channel::<Chunk>(chunk_queue.len() + 100);
     for chunk in chunk_queue {
         let _ = tx.send(chunk).await;
     }

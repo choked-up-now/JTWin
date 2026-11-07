@@ -12,7 +12,7 @@ struct Args {
     url: Option<String>,
     #[arg(short, long)]
     output: Option<String>,
-    #[arg(short, long, default_value_t = 8)] // 默认初始 8 线程
+    #[arg(short, long, default_value_t = 8)]
     connections: usize,
     #[arg(short, long)]
     update: bool,
@@ -65,7 +65,6 @@ async fn main() -> anyhow::Result<()> {
         { eprintln!("❌ 当前为精简版，不支持 P2P"); return Ok(()); }
     }
 
-    // 【新增拦截】
     if let Err(e) = engine::validate_download_url(&raw_url) {
         eprintln!("❌ {}", e);
         return Ok(());
@@ -97,12 +96,12 @@ async fn main() -> anyhow::Result<()> {
         if total_size == 0 { anyhow::bail!("无法获取文件大小"); }
         let file = std::fs::File::create(&file_path)?; file.set_len(total_size)?;
         
-        // 注意这里：Task::new 不再需要传入并发数，统一由引擎控制
         let t = Task::new("cli_task".to_string(), url.clone(), file_path.clone(), total_size);
         storage::save_task(&t).await?;
         Arc::new(Mutex::new(t))
     };
 
+    // 启动动态调度引擎：初始 4 线程，最高用户指定线程数
     engine::download_task(task_arc.clone(), client.clone(), 4, args.connections.max(4)).await?;
 
     println!("\n✅ 下载完成！");
