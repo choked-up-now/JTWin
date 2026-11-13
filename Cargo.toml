@@ -1,6 +1,6 @@
 [package]
 name = "jituan"
-version = "0.9.24-beta.1"
+version = "0.9.23"
 edition = "2024"
 
 [lib]
@@ -18,6 +18,7 @@ path = "src/bin/jituan-gui.rs"
 required-features = ["gui"]
 
 [dependencies]
+percent-encoding = "2.3"
 anyhow = "1.0.104"
 tokio = { version = "1.53.3", features = ["full"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["stream", "http2", "native-tls", "json"] }
@@ -30,30 +31,19 @@ dirs = "5.0"
 rfd = "0.14"
 opener = "0.7"
 regex = "1.11"
-percent-encoding = "2.3"
-
-# 可选依赖 (P2P 相关)
-bendy = { version = "0.5", features = ["serde"], optional = true }
-sha1 = { version = "0.10", optional = true }
-serde_bytes = { version = "0.11", optional = true }
-rand = { version = "0.8", optional = true }
-url = { version = "2.5", optional = true }
-num-bigint = { version = "0.4", optional = true }
-num-traits = { version = "0.2", optional = true }
-rc4 = { version = "0.1", optional = true }
 
 # 可选依赖 (GUI/CLI)
 clap = { version = "4.5", features = ["derive"], optional = true }
 eframe = { version = "0.28", optional = true }
 
+# 可选依赖 (P2P 核心)
+librqbit = { version = "9.1", optional = true }
+
 [features]
 default = []
 cli = ["dep:clap"]
 gui = ["dep:eframe"]
-p2p = [
-    "dep:bendy", "dep:sha1", "dep:serde_bytes",
-    "dep:rand", "dep:url", "dep:num-bigint", "dep:num-traits", "dep:rc4"
-]
+p2p = ["dep:librqbit"]
 full = ["cli", "gui", "p2p"]
 
 [profile.release]

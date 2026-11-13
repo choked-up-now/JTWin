@@ -8,8 +8,5 @@ pub mod core {
     
     #[cfg(feature = "p2p")]
     pub mod torrent;
-    #[cfg(feature = "p2p")]
-    pub mod tracker;
-    #[cfg(feature = "p2p")]
-    pub mod mse;
+    // 移除了 tracker 和 mse，这部分已经交给 librqbit 处理了
 }
