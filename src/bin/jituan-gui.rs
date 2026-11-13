@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 
 use eframe::egui;
-use jituan_core::core::{engine, mirror, models::Task, updater};
+use jituan_core::core::{engine, i18n::I18n, mirror, models::Task, updater};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
@@ -35,15 +35,17 @@ struct JituanApp {
     update_available: Arc<StdMutex<Option<(String, String)>>>,
     is_checking_update: bool,
     has_checked_update: bool,
+    i18n: I18n,
 }
 
 impl Default for JituanApp {
     fn default() -> Self {
+        let i18n = I18n::new();
         Self {
             url: "https://github.com/choked-up-now/JiTuan-win/releases/download/v0.4.2/JiTuan_v0.4.2_Setup.exe".to_string(),
             save_dir: dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap()).to_string_lossy().to_string(),
             file_name: "JiTuan_v0.4.2_Setup.exe".to_string(),
-            status_text: "准备就绪".to_string(),
+            status_text: i18n.t("status.ready"),
             progress: Arc::new(StdMutex::new(0.0)),
             is_downloading: false,
             use_mirror: true,
@@ -54,6 +56,7 @@ impl Default for JituanApp {
             update_available: Arc::new(StdMutex::new(None)),
             is_checking_update: false,
             has_checked_update: false,
+            i18n,
         }
     }
 }
@@ -79,18 +82,19 @@ impl eframe::App for JituanApp {
             });
         }
 
+        // ================== 设置窗口 ==================
         if self.is_settings_open {
             let mut open = true;
-            egui::Window::new("⚙️ 设置")
+            egui::Window::new(format!("⚙️ {}", self.i18n.t("btn.settings")))
                 .open(&mut open)
                 .resizable(false)
                 .collapsible(false)
                 .default_width(320.0)
                 .show(ctx, |ui| {
                     ui.add_space(5.0);
-                    ui.heading("下载偏好");
+                    ui.heading(self.i18n.t("settings.preferences"));
                     ui.separator();
-                    ui.checkbox(&mut self.use_mirror, "启用镜像智能加速");
+                    ui.checkbox(&mut self.use_mirror, self.i18n.t("settings.mirror"));
                     
                     if ui.button("管理镜像规则").clicked() {
                         if mirror::use_internal_editor() {
@@ -103,14 +107,38 @@ impl eframe::App for JituanApp {
                     }
 
                     ui.add_space(15.0);
-                    ui.heading("更新通道");
+                    ui.heading(self.i18n.t("settings.update_channel"));
                     ui.separator();
-                    ui.checkbox(&mut self.allow_alpha, "接收预览版 (Alpha/Beta)");
-                    ui.label("勾选后可提前体验新功能，但可能不稳定。");
+                    ui.checkbox(&mut self.allow_alpha, self.i18n.t("settings.alpha"));
+
+                    ui.add_space(15.0);
+                    ui.heading(self.i18n.t("settings.language"));
+                    ui.separator();
+                    
+                    // 【核心修复】避免借用冲突
+                    let mut selected_lang = self.i18n.current_lang.clone();
+                    let mut lang_to_set = None; 
+                    
+                    egui::ComboBox::from_id_source("lang_combo")
+                        .selected_text(&selected_lang)
+                        .show_ui(ui, |ui| {
+                            for lang in &self.i18n.available_langs {
+                                if ui.selectable_value(&mut selected_lang, lang.clone(), lang).clicked() {
+                                    lang_to_set = Some(lang.clone());
+                                }
+                            }
+                        });
+
+                    if let Some(lang) = lang_to_set {
+                        self.i18n.set_language(&lang);
+                        self.status_text = self.i18n.t("status.ready");
+                        ctx.request_repaint();
+                    }
                 });
             if !open { self.is_settings_open = false; }
         }
 
+        // ================== 镜像编辑窗口 ==================
         if self.is_editing_mirrors {
             let mut open = true;
             egui::Window::new("智能镜像规则管理")
@@ -177,14 +205,17 @@ impl eframe::App for JituanApp {
             if !open { self.is_editing_mirrors = false; }
         }
 
+        // ================== 主界面 ==================
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("🌊 汲湍 (JiTuan)");
+                ui.heading(format!("🌊 {}", self.i18n.t("app.title")));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("⚙️ 设置").clicked() { self.is_settings_open = true; }
+                    if ui.button(format!("⚙️ {}", self.i18n.t("btn.settings"))).clicked() {
+                        self.is_settings_open = true;
+                    }
                     ui.separator();
                     ui.label(format!("v{}", updater::CURRENT_VERSION));
-                    if ui.add_enabled(!self.is_checking_update, egui::Button::new("手动检查")).clicked() {
+                    if ui.add_enabled(!self.is_checking_update, egui::Button::new(self.i18n.t("btn.check_update"))).clicked() {
                         self.is_checking_update = true;
                         let ctx_clone = ctx.clone();
                         let update_state = self.update_available.clone();
@@ -222,17 +253,17 @@ impl eframe::App for JituanApp {
 
             ui.add_space(10.0);
             egui::Grid::new("input_grid").num_columns(3).spacing([10.0, 15.0]).show(ui, |ui| {
-                ui.label("下载地址");
+                ui.label(self.i18n.t("label.download_url"));
                 let url_res = ui.add_sized([360.0, 22.0], egui::TextEdit::singleline(&mut self.url));
                 ui.end_row();
                 if url_res.changed() {
                     if let Some(filename) = extract_filename_from_url(&self.url) { self.file_name = filename; }
                 }
 
-                ui.label("保存到");
+                ui.label(self.i18n.t("label.save_to"));
                 ui.add_enabled_ui(!self.is_downloading, |ui| {
                     ui.add_sized([320.0, 22.0], egui::TextEdit::singleline(&mut self.save_dir));
-                    if ui.button("选择").clicked() {
+                    if ui.button(self.i18n.t("btn.select")).clicked() {
                         let mut dialog = rfd::FileDialog::new();
                         if Path::new(&self.save_dir).exists() { dialog = dialog.set_directory(&self.save_dir); }
                         if let Some(folder) = dialog.pick_folder() { self.save_dir = folder.to_string_lossy().to_string(); }
@@ -240,7 +271,7 @@ impl eframe::App for JituanApp {
                 });
                 ui.end_row();
 
-                ui.label("文件名");
+                ui.label(self.i18n.t("label.filename"));
                 ui.add_enabled_ui(!self.is_downloading, |ui| {
                     ui.add_sized([360.0, 22.0], egui::TextEdit::singleline(&mut self.file_name));
                 });
@@ -253,14 +284,13 @@ impl eframe::App for JituanApp {
                 ui.add_space((ui.available_width() - total_width) / 2.0);
 
                 ui.add_enabled_ui(!self.is_downloading, |ui| {
-                    if ui.add_sized([100.0, 30.0], egui::Button::new("开始下载")).clicked() {
+                    if ui.add_sized([100.0, 30.0], egui::Button::new(self.i18n.t("btn.start_download"))).clicked() {
                         self.is_downloading = true;
-                        self.status_text = "正在准备下载...".to_string();
+                        self.status_text = self.i18n.t("status.connecting");
                         *self.progress.lock().unwrap() = 0.0; 
                         
                         let raw_url = self.url.clone();
                         
-                        // 【核心新增】拦截网盘分享链接
                         if let Err(e) = jituan_core::core::engine::validate_download_url(&raw_url) {
                             self.status_text = format!("❌ {}", e);
                             *self.progress.lock().unwrap() = -1.0;
@@ -330,11 +360,9 @@ impl eframe::App for JituanApp {
                                 if let Ok(file) = std::fs::File::create(&path_buf) { let _ = file.set_len(total_size); } 
                                 else { *progress_clone.lock().unwrap() = -1.0; ctx_clone.request_repaint(); return; }
                                 
-                                // 使用新的 Task 模型
                                 let t = Task::new("gui_task".to_string(), final_url.clone(), path_buf.clone(), total_size);
                                 let task_arc = Arc::new(Mutex::new(t));
 
-                                // UI 监控协程
                                 let monitor_task = task_arc.clone();
                                 let p_clone = progress_clone.clone();
                                 let c_clone = ctx_clone.clone();
@@ -351,23 +379,22 @@ impl eframe::App for JituanApp {
                                     }
                                 });
 
-                                // 启动动态调度引擎：初始 4 线程，最高 32 线程
                                 let _ = engine::download_task(task_arc, client, 4, 32).await;
                             });
                         });
                     }
                 });
 
-                if ui.add_sized([100.0, 30.0], egui::Button::new("打开文件夹")).clicked() {
+                if ui.add_sized([100.0, 30.0], egui::Button::new(self.i18n.t("btn.open_folder"))).clicked() {
                     let _ = opener::open(&self.save_dir);
                 }
             });
 
             ui.add_space(10.0);
             if current_progress < 0.0 {
-                ui.colored_label(egui::Color32::RED, "❌ 下载失败，请检查网络或配置");
+                ui.colored_label(egui::Color32::RED, self.i18n.t("status.failed"));
             } else if current_progress >= 1.0 {
-                ui.colored_label(egui::Color32::GREEN, "✅ 下载完成！");
+                ui.colored_label(egui::Color32::GREEN, self.i18n.t("status.completed"));
             } else {
                 ui.add(egui::ProgressBar::new(current_progress).show_percentage());
                 ui.label(&self.status_text);
