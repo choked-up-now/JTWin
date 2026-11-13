@@ -11,6 +11,7 @@ use jituan_core::core::torrent;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(feature = "p2p")]
 use std::sync::atomic::{AtomicI32, Ordering};
 use tokio::sync::Mutex;
 
