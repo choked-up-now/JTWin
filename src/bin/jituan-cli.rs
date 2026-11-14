@@ -1,9 +1,6 @@
 use clap::Parser;
 use jituan_core::core::{
-    engine, mirror,
-    models::{Task, TaskStatus},
-    scheduler::Scheduler,
-    storage, updater,
+    engine, mirror, models::{Task, TaskStatus}, scheduler::Scheduler, storage, task, updater,
 };
 
 #[cfg(feature = "p2p")]
@@ -11,35 +8,26 @@ use jituan_core::core::torrent;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-#[cfg(feature = "p2p")]
 use std::sync::atomic::{AtomicI32, Ordering};
 use tokio::sync::Mutex;
 
 #[derive(Parser, Debug)]
 #[command(name = "汲湍 (jituan-cli)", version, about = "极致轻量多线程下载器")]
 struct Args {
-    /// 下载链接 (HTTP URL 或 magnet: 磁力链接)
     url: Option<String>,
-
-    /// 保存文件名/目录 (可选，默认保存到系统的下载文件夹)
     #[arg(short, long)]
     output: Option<String>,
-
-    /// 初始并发分片数 (默认 8)
     #[arg(short, long, default_value_t = 8)]
     connections: usize,
-
-    /// 检查并更新到最新版本
     #[arg(short, long)]
     update: bool,
-
-    /// 禁用 HTTP 镜像智能加速
     #[arg(long)]
     no_mirror: bool,
-
-    /// 接收预览版 (Alpha/Beta) 更新
     #[arg(long)]
     alpha: bool,
+    /// 下载完成后根据 actions.json 规则自动执行后续操作（如自动解压）
+    #[arg(long)]
+    action: bool,
 }
 
 #[tokio::main]
@@ -68,23 +56,21 @@ async fn main() -> anyhow::Result<()> {
         Some(path) => PathBuf::from(path.trim_matches('"')),
         None => dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap()),
     };
-    let _save_dir_str = save_dir.to_string_lossy().to_string();
+    let save_dir_str = save_dir.to_string_lossy().to_string();
 
     // ==========================================
     // 分流 1：P2P 下载
     // ==========================================
-    if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
+    if task::is_p2p_url(&raw_url) {
         #[cfg(feature = "p2p")]
         {
             println!("🌊 汲湍 P2P 引擎启动");
-            
             let last_pct = Arc::new(AtomicI32::new(-1));
             let last_pct_clone = last_pct.clone();
             
-            let result = torrent::download_p2p(&raw_url, &_save_dir_str, move |progress, status| {
+            let result = torrent::download_p2p(&raw_url, &save_dir_str, move |progress, status| {
                 let pct = (progress * 100.0) as i32;
                 let last = last_pct_clone.load(Ordering::Relaxed);
-                // 当进度发生 1% 的变化，或者刚启动时，才打印换行
                 if pct > last || pct == 0 {
                     println!("[{}%] {}", pct, status);
                     last_pct_clone.store(pct, Ordering::Relaxed);
@@ -93,6 +79,13 @@ async fn main() -> anyhow::Result<()> {
 
             if let Err(e) = result {
                 eprintln!("\n❌ P2P 失败: {}", e);
+            } else if args.action {
+                if let Some(file_name) = task::extract_filename_from_url(&raw_url) {
+                    let file_path = save_dir.join(file_name);
+                    if let Ok(Some(msg)) = task::handle_post_download(&file_path, true) {
+                        println!("[系统] {}", msg);
+                    }
+                }
             }
             println!(); 
             return Ok(());
@@ -109,23 +102,10 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let url = if args.no_mirror {
-        raw_url.clone()
-    } else {
-        println!("[镜像] 正在智能测速...");
-        mirror::get_fastest_mirror(&raw_url).await
-    };
-
-    let allow_alpha = args.alpha;
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if let Ok(Some((new_ver, _))) = updater::check_update(allow_alpha).await {
-            println!("\n\x1b[33m[提示] 发现汲湍新版本 v{}，可使用 `jituan-cli --update` 升级。\x1b[0m", new_ver);
-        }
-    });
+    let url = if args.no_mirror { raw_url.clone() } else { mirror::get_fastest_mirror(&raw_url).await };
 
     let file_path = if save_dir.is_dir() {
-        save_dir.join("download.bin")
+        save_dir.join(task::extract_filename_from_url(&url).unwrap_or_else(|| "download.bin".to_string()))
     } else {
         save_dir
     };
@@ -168,36 +148,35 @@ async fn main() -> anyhow::Result<()> {
         t.status = TaskStatus::Downloading;
     }
 
-    // 启动后台监控进度
     let task_clone = task_arc.clone();
     let monitor = tokio::spawn(async move {
         loop {
             let t = task_clone.lock().await;
-            
             print!("\r进度: {:.2}% ({:.2}/{:.2} MB)", 
                 t.progress(), 
                 t.downloaded_bytes as f64/1024.0/1024.0, 
                 t.total_size as f64/1024.0/1024.0
             );
             use std::io::Write; std::io::stdout().flush().unwrap();
-            
             if t.downloaded_bytes >= t.total_size { 
                 println!("\n✅ 下载完成！"); 
                 break; 
             }
-            
             let _ = storage::save_task(&t).await;
-            
             drop(t);
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
     });
 
-    // 【核心修复】调用新的动态调度引擎
     engine::download_task(task_arc, client, 4, args.connections.max(4)).await?;
 
     let _ = monitor.await;
     if meta_path.exists() { let _ = tokio::fs::remove_file(meta_path).await; }
+
+    // 动作执行
+    if let Ok(Some(msg)) = task::handle_post_download(&file_path, args.action) {
+        println!("[系统] {}", msg);
+    }
     
     Ok(())
 }

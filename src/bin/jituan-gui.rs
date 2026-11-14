@@ -1,24 +1,10 @@
 #![windows_subsystem = "windows"]
 
 use eframe::egui;
-use jituan_core::core::{engine, i18n::I18n, mirror, models::Task, updater};
+use jituan_core::core::{engine, i18n::I18n, mirror, models::Task, task, updater};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
-
-fn extract_filename_from_url(url: &str) -> Option<String> {
-    if url.starts_with("magnet:?") {
-        if let Some(dn_part) = url.split('&').find(|s| s.starts_with("dn=")) {
-            let name = &dn_part[3..];
-            return Some(percent_encoding::percent_decode_str(name).decode_utf8_lossy().to_string());
-        }
-        return None;
-    }
-    let path = url.split('?').next()?;
-    let parts: Vec<&str> = path.split('/').collect();
-    let last = parts.last()?;
-    if !last.is_empty() && last.contains('.') { Some(last.to_string()) } else { None }
-}
 
 struct JituanApp {
     url: String,
@@ -106,6 +92,10 @@ impl eframe::App for JituanApp {
                         }
                     }
 
+                    if ui.button("管理自动化规则").clicked() {
+                        let _ = opener::open(jituan_core::core::action::ActionManager::get_config_path());
+                    }
+
                     ui.add_space(15.0);
                     ui.heading(self.i18n.t("settings.update_channel"));
                     ui.separator();
@@ -115,7 +105,6 @@ impl eframe::App for JituanApp {
                     ui.heading(self.i18n.t("settings.language"));
                     ui.separator();
                     
-                    // 【核心修复】避免借用冲突
                     let mut selected_lang = self.i18n.current_lang.clone();
                     let mut lang_to_set = None; 
                     
@@ -257,7 +246,7 @@ impl eframe::App for JituanApp {
                 let url_res = ui.add_sized([360.0, 22.0], egui::TextEdit::singleline(&mut self.url));
                 ui.end_row();
                 if url_res.changed() {
-                    if let Some(filename) = extract_filename_from_url(&self.url) { self.file_name = filename; }
+                    if let Some(filename) = task::extract_filename_from_url(&self.url) { self.file_name = filename; }
                 }
 
                 ui.label(self.i18n.t("label.save_to"));
@@ -297,7 +286,7 @@ impl eframe::App for JituanApp {
                             return;
                         }
 
-                        if raw_url.starts_with("magnet:") || raw_url.ends_with(".torrent") {
+                        if task::is_p2p_url(&raw_url) {
                             #[cfg(feature = "p2p")]
                             {
                                 let dir_str = self.save_dir.clone();
@@ -394,7 +383,27 @@ impl eframe::App for JituanApp {
             if current_progress < 0.0 {
                 ui.colored_label(egui::Color32::RED, self.i18n.t("status.failed"));
             } else if current_progress >= 1.0 {
-                ui.colored_label(egui::Color32::GREEN, self.i18n.t("status.completed"));
+                ui.horizontal(|ui| {
+                    ui.colored_label(egui::Color32::GREEN, self.i18n.t("status.completed"));
+                    
+                    let file_path = Path::new(&self.save_dir).join(&self.file_name);
+                    if file_path.exists() {
+                        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("file").to_uppercase();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("打开文件夹").clicked() {
+                                let _ = opener::open(&self.save_dir);
+                            }
+                            
+                            if ui.button(format!("⚡ 智能执行 .{}", ext)).clicked() {
+                                match jituan_core::core::task::handle_post_download(&file_path, true) {
+                                    Ok(Some(msg)) => self.status_text = format!("✅ {}", msg),
+                                    Ok(None) => self.status_text = "✅ 已调用默认程序".to_string(),
+                                    Err(e) => self.status_text = format!("❌ {}", e),
+                                }
+                            }
+                        });
+                    }
+                });
             } else {
                 ui.add(egui::ProgressBar::new(current_progress).show_percentage());
                 ui.label(&self.status_text);

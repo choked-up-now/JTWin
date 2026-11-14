@@ -6,6 +6,8 @@ pub mod core {
     pub mod updater;
     pub mod mirror;
     pub mod i18n;
+    pub mod action;
+    pub mod task; // 新增
     
     #[cfg(feature = "p2p")]
     pub mod torrent;
