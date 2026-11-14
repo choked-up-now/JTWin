@@ -1,7 +1,7 @@
 #![windows_subsystem = "windows"]
 
 use eframe::egui;
-use jituan_core::core::{engine, i18n::I18n, mirror, models::Task, task, updater};
+use jituan_core::core::{engine, i18n::I18n, mirror, models::Task, settings, task, updater};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
@@ -22,11 +22,13 @@ struct JituanApp {
     is_checking_update: bool,
     has_checked_update: bool,
     i18n: I18n,
+    custom_font_path: Option<String>,
 }
 
 impl Default for JituanApp {
     fn default() -> Self {
         let i18n = I18n::new();
+        let app_settings = settings::load_settings();
         Self {
             url: "https://github.com/choked-up-now/JiTuan-win/releases/download/v0.4.2/JiTuan_v0.4.2_Setup.exe".to_string(),
             save_dir: dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap()).to_string_lossy().to_string(),
@@ -43,6 +45,7 @@ impl Default for JituanApp {
             is_checking_update: false,
             has_checked_update: false,
             i18n,
+            custom_font_path: app_settings.custom_font_path,
         }
     }
 }
@@ -122,6 +125,28 @@ impl eframe::App for JituanApp {
                         self.i18n.set_language(&lang);
                         self.status_text = self.i18n.t("status.ready");
                         ctx.request_repaint();
+                    }
+
+                    // 【核心新增】字体设置
+                    ui.add_space(15.0);
+                    ui.heading("字体设置 (Font)");
+                    ui.separator();
+                    ui.label(match &self.custom_font_path {
+                        Some(p) => format!("当前字体: {}", p),
+                        None => "当前使用系统默认字体".to_string(),
+                    });
+                    if ui.button("📂 选择自定义字体 (TTF/TTC)").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Font", &["ttf", "ttc", "otf"])
+                            .pick_file()
+                        {
+                            self.custom_font_path = Some(path.to_string_lossy().to_string());
+                            let app_settings = jituan_core::core::settings::AppSettings {
+                                custom_font_path: self.custom_font_path.clone(),
+                            };
+                            let _ = jituan_core::core::settings::save_settings(&app_settings);
+                            self.status_text = "字体已更改，重启软件后生效！".to_string();
+                        }
                     }
                 });
             if !open { self.is_settings_open = false; }
@@ -418,13 +443,39 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default().with_inner_size([550.0, 400.0]),
         ..Default::default()
     };
+    
     eframe::run_native("汲湍", options, Box::new(|cc| {
         let mut fonts = egui::FontDefinitions::default();
-        if let Ok(font_data) = std::fs::read("C:\\Windows\\Fonts\\msyh.ttc") {
-            fonts.font_data.insert("msyh".to_owned(), egui::FontData::from_owned(font_data));
-            fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "msyh".to_owned());
-            fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "msyh".to_owned());
+        
+        // 1. 尝试加载用户自定义字体
+        let app_settings = jituan_core::core::settings::load_settings();
+        let mut loaded = false;
+
+        if let Some(custom_path) = app_settings.custom_font_path {
+            if let Ok(font_data) = std::fs::read(&custom_path) {
+                fonts.font_data.insert("custom".to_owned(), egui::FontData::from_owned(font_data));
+                fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "custom".to_owned());
+                fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "custom".to_owned());
+                loaded = true;
+            }
         }
+
+        // 2. 如果没自定义，加载默认的系统字体
+        if !loaded {
+            #[cfg(target_os = "windows")]
+            let font_path = "C:\\Windows\\Fonts\\msyh.ttc";
+            #[cfg(target_os = "macos")]
+            let font_path = "/System/Library/Fonts/PingFang.ttc";
+            #[cfg(target_os = "linux")]
+            let font_path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
+
+            if let Ok(font_data) = std::fs::read(font_path) {
+                fonts.font_data.insert("sys_font".to_owned(), egui::FontData::from_owned(font_data));
+                fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap().insert(0, "sys_font".to_owned());
+                fonts.families.get_mut(&egui::FontFamily::Monospace).unwrap().insert(0, "sys_font".to_owned());
+            }
+        }
+
         cc.egui_ctx.set_fonts(fonts);
         Ok(Box::new(JituanApp::default()))
     }))

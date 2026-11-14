@@ -8,6 +8,7 @@ use jituan_core::core::torrent;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(feature = "p2p")]
 use std::sync::atomic::{AtomicI32, Ordering};
 use tokio::sync::Mutex;
 
@@ -56,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
         Some(path) => PathBuf::from(path.trim_matches('"')),
         None => dirs::download_dir().unwrap_or_else(|| std::env::current_dir().unwrap()),
     };
+    #[allow(unused_variables)]
     let save_dir_str = save_dir.to_string_lossy().to_string();
 
     // ==========================================

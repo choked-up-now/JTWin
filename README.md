@@ -1,6 +1,6 @@
 # 汲湍 (JiTuan)
 
-[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](https://atomgit.com/choked-up-now/JTWin/releases)
+[![Version](https://img.shields.io/badge/version-0.11.1-blue.svg)](https://atomgit.com/choked-up-now/JTWin/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)]()
 [![Language](https://img.shields.io/badge/language-Rust-orange.svg)](https://www.rust-lang.org/)
@@ -13,9 +13,10 @@
 - **极致轻量**：原生编译，拒绝臃肿。提供带图形界面的独立可执行文件，体积仅数 MB。
 - **纯 HTTP 极速下载**：支持 Range 请求、多线程分片下载、字节级断点续传（`.jtdl` 文件）。
 - **智能线程动态调节 (AIMD)**：基于微块任务队列，在带宽充足时自动增加线程，在触发风控/限速时立刻线程减半，完美平衡速度与封禁风险。
-- **纯手写原生 P2P 引擎**：底层全面接入成熟网络栈，原生支持 DHT 去中心化节点发现、UDP 打洞。实测公网磁力链下载速度可突破 35 MB/s。
+- **满血 P2P 引擎**：底层全面接入成熟网络栈，原生支持 DHT 去中心化节点发现与 UDP 打洞。实测公网磁力链下载速度可突破 35 MB/s。
 - **自动化动作引擎 (Actions)**：下载完成后，可根据文件后缀名自动调用外部程序（如 7-Zip 静默解压、调用指定播放器），真正实现“下载即用”。
-- **原生系统语言跟随**：自动检测系统语言，支持外挂 JSON 语言包（AppData 目录下），瞬时切换无需重启。
+- **外挂式多语言支持**：启动自动跟随系统语言，支持随时切换。语言包以 JSON 外挂形式存放于 AppData 目录，用户可自行 DIY 翻译。
+- **字体自定义**：内置跨平台系统字体自适应（Windows 雅黑 / macOS 苹方 / Linux Noto），同时支持用户手动加载任意 `.ttf` 或 `.ttc` 字体。
 - **按需定制安装**：安装向导提供组件选择，用户可自由决定是否安装 P2P 种子下载支持，避免功能冗余。
 
 ## 安装指南
@@ -30,7 +31,7 @@
 ## 使用指南
 
 ### GUI 桌面模式
-双击运行 `jituan-gui.exe`。支持粘贴链接自动提取文件名、自定义保存路径、镜像测速，以及下载完成后的“⚡ 智能执行”一键解压/打开。
+双击运行 `jituan-gui.exe`。支持粘贴链接自动提取文件名、自定义保存路径、镜像测速，以及下载完成后的“智能执行”一键解压/打开。
 
 ### CLI 命令行模式
 ```bash

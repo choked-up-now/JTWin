@@ -2,7 +2,7 @@
 Copyright 2026 choked-up-now
 
 This product includes software developed at
-choked-up-now (https://atomgit.com/choked-up-now/JiTuan).
+choked-up-now (https://atomgit.com/choked-up-now/JTWin).
 
 ================================================================================
 Third-Party Components Notice
@@ -22,13 +22,22 @@ please refer to the Cargo.lock file.
 - eframe / egui (https://crates.io/crates/eframe)
   License: MIT OR Apache-2.0
 
-- serde (https://crates.io/crates/serde)
+- librqbit (https://crates.io/crates/librqbit)
   License: MIT OR Apache-2.0
 
-- serde_json (https://crates.io/crates/serde_json)
+- serde / serde_json (https://crates.io/crates/serde)
   License: MIT OR Apache-2.0
 
 - clap (https://crates.io/crates/clap)
+  License: MIT OR Apache-2.0
+
+- rfd (https://crates.io/crates/rfd)
+  License: MIT
+
+- opener (https://crates.io/crates/opener)
+  License: MIT OR Apache-2.0
+
+- sys-locale (https://crates.io/crates/sys-locale)
   License: MIT OR Apache-2.0
 
 ================================================================================
@@ -37,7 +46,8 @@ System Resources Notice
 
 The Graphical User Interface (GUI) version of this software dynamically loads 
 system fonts provided by the host operating system for text rendering (e.g., 
-"Microsoft YaHei" on Windows). These font files are not distributed with this 
-software and remain subject to their respective system vendor licenses.
+"Microsoft YaHei" on Windows, "PingFang" on macOS, "Noto Sans CJK" on Linux). 
+These font files are not distributed with this software and remain subject 
+to their respective system vendor licenses.
 
 ================================================================================
